@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -18,8 +19,6 @@ export class AuthService {
   login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Temporary test user
-    // Later we will replace this with database checking
     const testUser = {
       id: 1,
       username: 'testuser',
@@ -40,6 +39,17 @@ export class AuthService {
         email: testUser.email,
         role: testUser.role,
       },
+    };
+  }
+
+  forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
+    const { email } = forgotPasswordDto;
+
+    console.log('Forgot password requested for:', email);
+
+    return {
+      message:
+        'If an account exists with this email, a password reset link will be sent.',
     };
   }
 }
