@@ -2,9 +2,11 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { PrismaService } from '../prisma.service';
 
 @Injectable()
 export class AuthService {
+  constructor(private readonly prisma: PrismaService) {}
   register(registerDto: RegisterDto) {
     return {
       message: 'Register route is working',
