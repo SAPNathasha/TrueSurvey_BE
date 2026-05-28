@@ -11,15 +11,25 @@ import * as crypto from 'crypto';
 import { PrismaService } from './prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { StorageService } from './storage/storage.service';
 import { UserRole } from '../generated/prisma/enums';
-
-type UploadedFile = {
-  path: string;
-};
 
 type TokenPayload = {
   sub: string;
   role: UserRole;
+};
+
+type RegisterResponse = {
+  message: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    role: UserRole;
+    nicImagePath: string | null;
+    selfiePath: string | null;
+    createdAt: Date;
+  };
 };
 
 type LoginResponse = {
@@ -54,6 +64,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly storageService: StorageService,
   ) {}
 
   private getEnvValue(name: string, fallback: string): string {
@@ -67,10 +78,10 @@ export class AuthService {
   async register(
     registerDto: RegisterDto,
     files?: {
-      nicImage?: UploadedFile[];
-      selfieImage?: UploadedFile[];
+      nicImage?: Express.Multer.File[];
+      selfieImage?: Express.Multer.File[];
     },
-  ) {
+  ): Promise<RegisterResponse> {
     const { username, email, password, role, nicNumber } = registerDto;
 
     const existingUser = await this.prisma.user.findUnique({
@@ -101,18 +112,45 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const nicImagePath: string | null = files?.nicImage?.[0]?.path ?? null;
-    const selfiePath: string | null = files?.selfieImage?.[0]?.path ?? null;
+    /**
+     * We create the user ID before saving the user.
+     * This allows us to upload files into a clean folder structure:
+     *
+     * users/{userId}/verification/nic/...
+     * users/{userId}/verification/selfie/...
+     */
+    const userId = crypto.randomUUID();
+
+    const nicImage = files?.nicImage?.[0];
+    const selfieImage = files?.selfieImage?.[0];
+
+    let nicImageUrl: string | null = null;
+    let selfieImageUrl: string | null = null;
+
+    if (nicImage) {
+      nicImageUrl = await this.storageService.uploadImage(
+        nicImage,
+        `users/${userId}/verification/nic`,
+      );
+    }
+
+    if (selfieImage) {
+      selfieImageUrl = await this.storageService.uploadImage(
+        selfieImage,
+        `users/${userId}/verification/selfie`,
+      );
+    }
 
     const user = await this.prisma.user.create({
       data: {
+        id: userId,
         username,
         email,
         password: hashedPassword,
         role,
         nicHash,
-        nicImagePath,
-        selfiePath,
+        nicImagePath: nicImageUrl,
+        selfiePath: selfieImageUrl,
       },
       select: {
         id: true,

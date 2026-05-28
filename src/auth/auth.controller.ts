@@ -1,15 +1,14 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Post,
   UploadedFiles,
   UseInterceptors,
-  BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { memoryStorage } from 'multer';
 import type { Express } from 'express';
-import { extname } from 'path';
 
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -27,18 +26,7 @@ export class AuthController {
         { name: 'selfieImage', maxCount: 1 },
       ],
       {
-        storage: diskStorage({
-          destination: './uploads/auth',
-          filename: (req, file, callback) => {
-            const uniqueSuffix = `${Date.now()}-${Math.round(
-              Math.random() * 1e9,
-            )}`;
-
-            const fileExtension = extname(file.originalname);
-
-            callback(null, `${file.fieldname}-${uniqueSuffix}${fileExtension}`);
-          },
-        }),
+        storage: memoryStorage(),
 
         fileFilter: (req, file, callback) => {
           const allowedMimeTypes = [
@@ -61,7 +49,7 @@ export class AuthController {
         },
 
         limits: {
-          fileSize: 5 * 1024 * 1024, // 5MB per image
+          fileSize: 5 * 1024 * 1024,
         },
       },
     ),
