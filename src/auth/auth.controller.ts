@@ -27,13 +27,6 @@ export class AuthController {
   ) {
     const result = await this.authService.login(loginDto);
 
-    response.cookie('accessToken', result.accessToken, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 15 * 60 * 1000,
-    });
-
     response.cookie('refreshToken', result.refreshToken, {
       httpOnly: true,
       secure: false,

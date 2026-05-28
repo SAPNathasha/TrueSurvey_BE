@@ -25,6 +25,14 @@ type RefreshTokenResponse = {
   refreshToken: string;
 };
 
+type SavedRefreshToken = {
+  id: string;
+  tokenHash: string;
+  userId: string;
+  expiresAt: Date;
+  createdAt: Date;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -52,24 +60,15 @@ export class AuthService {
     }
 
     const payload: TokenPayload = {
-      sub: user.id,
-      email: user.email,
+      sub: user.id, //public id or?
+      email: user.email, //don't want to pass email
       role: user.role,
     };
 
     const accessToken = await this.generateAccessToken(payload);
     const refreshToken = await this.generateRefreshToken(payload);
 
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-
-    await this.prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        refreshTokenHash,
-      },
-    });
+    await this.saveRefreshToken(user.id, refreshToken);
 
     return {
       message: 'Login successful',
@@ -92,19 +91,32 @@ export class AuthService {
       where: {
         id: userId,
       },
+      include: {
+        refreshTokens: true,
+      },
     });
 
-    if (!user || !user.refreshTokenHash) {
+    if (!user) {
       throw new UnauthorizedException('Access denied');
     }
 
-    const isRefreshTokenMatched = await bcrypt.compare(
+    const validRefreshToken = await this.findMatchingRefreshToken(
       refreshToken,
-      user.refreshTokenHash,
+      user.refreshTokens,
     );
 
-    if (!isRefreshTokenMatched) {
+    if (!validRefreshToken) {
       throw new UnauthorizedException('Access denied');
+    }
+
+    if (validRefreshToken.expiresAt < new Date()) {
+      await this.prisma.refreshToken.delete({
+        where: {
+          id: validRefreshToken.id,
+        },
+      });
+
+      throw new UnauthorizedException('Refresh token expired');
     }
 
     const payload: TokenPayload = {
@@ -116,16 +128,13 @@ export class AuthService {
     const newAccessToken = await this.generateAccessToken(payload);
     const newRefreshToken = await this.generateRefreshToken(payload);
 
-    const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
-
-    await this.prisma.user.update({
+    await this.prisma.refreshToken.delete({
       where: {
-        id: user.id,
-      },
-      data: {
-        refreshTokenHash: newRefreshTokenHash,
+        id: validRefreshToken.id,
       },
     });
+
+    await this.saveRefreshToken(user.id, newRefreshToken);
 
     return {
       accessToken: newAccessToken,
@@ -134,12 +143,9 @@ export class AuthService {
   }
 
   async logout(userId: string): Promise<{ message: string }> {
-    await this.prisma.user.update({
+    await this.prisma.refreshToken.deleteMany({
       where: {
-        id: userId,
-      },
-      data: {
-        refreshTokenHash: null,
+        userId,
       },
     });
 
@@ -148,9 +154,45 @@ export class AuthService {
     };
   }
 
+  private async saveRefreshToken(
+    userId: string,
+    refreshToken: string,
+  ): Promise<void> {
+    const tokenHash = await bcrypt.hash(refreshToken, 10);
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await this.prisma.refreshToken.create({
+      data: {
+        tokenHash,
+        userId,
+        expiresAt,
+      },
+    });
+  }
+
+  private async findMatchingRefreshToken(
+    refreshToken: string,
+    savedRefreshTokens: SavedRefreshToken[],
+  ): Promise<SavedRefreshToken | null> {
+    for (const savedToken of savedRefreshTokens) {
+      const isMatched = await bcrypt.compare(
+        refreshToken,
+        savedToken.tokenHash,
+      );
+
+      if (isMatched) {
+        return savedToken;
+      }
+    }
+
+    return null;
+  }
+
   private async generateAccessToken(payload: TokenPayload): Promise<string> {
     const expiresIn: StringValue =
-      (process.env.ACCESS_TOKEN_EXPIRES_IN as StringValue | undefined) ?? '15m';
+      (process.env.ACCESS_TOKEN_EXPIRES_IN as StringValue | undefined) ?? '5m';
 
     const options: JwtSignOptions = {
       secret: process.env.JWT_ACCESS_SECRET ?? 'access_secret',
