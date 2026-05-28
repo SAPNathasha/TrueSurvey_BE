@@ -20,6 +20,16 @@ export class AuthController {
     private readonly jwtService: JwtService,
   ) {}
 
+  private getBearerToken(request: Request): string {
+    const authHeader = request.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Refresh token not found');
+    }
+
+    return authHeader.split(' ')[1];
+  }
+
   @Post('login')
   async login(
     @Body() loginDto: LoginDto,
@@ -27,16 +37,19 @@ export class AuthController {
   ) {
     const result = await this.authService.login(loginDto);
 
-    response.cookie('refreshToken', result.refreshToken, {
+    // Access token is saved as an HTTP-only cookie
+    response.cookie('accessToken', result.accessToken, {
       httpOnly: true,
-      secure: false,
+      secure: false, // true in production with HTTPS
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 5 * 60 * 1000, // 5 minutes
     });
 
+    // Refresh token is returned to frontend
+    // Frontend should send it later as Bearer token
     return {
       message: result.message,
-      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       user: result.user,
     };
   }
@@ -46,11 +59,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = request.cookies?.refreshToken as string | undefined;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException('Refresh token not found');
-    }
+    const refreshToken = this.getBearerToken(request);
 
     let payload: TokenPayload;
 
@@ -67,23 +76,17 @@ export class AuthController {
       refreshToken,
     );
 
+    // New access token goes to cookie again
     response.cookie('accessToken', result.accessToken, {
       httpOnly: true,
-      secure: false,
+      secure: false, // true in production
       sameSite: 'lax',
-      maxAge: 15 * 60 * 1000,
-    });
-
-    response.cookie('refreshToken', result.refreshToken, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 5 * 60 * 1000,
     });
 
     return {
       message: 'Token refreshed successfully',
-      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
     };
   }
 
@@ -92,32 +95,30 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = request.cookies?.refreshToken as string | undefined;
-
-    if (!refreshToken) {
-      response.clearCookie('accessToken');
-      response.clearCookie('refreshToken');
-
-      return {
-        message: 'Logout successful',
-      };
-    }
+    let refreshToken: string | undefined;
 
     try {
-      const payload = await this.jwtService.verifyAsync<TokenPayload>(
-        refreshToken,
-        {
-          secret: process.env.JWT_REFRESH_SECRET,
-        },
-      );
-
-      await this.authService.logout(payload.sub);
+      refreshToken = this.getBearerToken(request);
     } catch {
-      // Even if token is invalid, clear cookies.
+      refreshToken = undefined;
+    }
+
+    if (refreshToken) {
+      try {
+        const payload = await this.jwtService.verifyAsync<TokenPayload>(
+          refreshToken,
+          {
+            secret: process.env.JWT_REFRESH_SECRET,
+          },
+        );
+
+        await this.authService.logout(payload.sub);
+      } catch {
+        // Even if refresh token is invalid, clear access token cookie
+      }
     }
 
     response.clearCookie('accessToken');
-    response.clearCookie('refreshToken');
 
     return {
       message: 'Logout successful',
