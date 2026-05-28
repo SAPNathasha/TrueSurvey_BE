@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -12,6 +13,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { StorageService } from './storage/storage.service';
+import { MailService } from './mail/mail.service';
 import { UserRole } from '../generated/prisma/enums';
 
 type TokenPayload = {
@@ -49,6 +51,14 @@ type RefreshTokenResponse = {
   refreshToken: string;
 };
 
+type ForgotPasswordResponse = {
+  message: string;
+};
+
+type ResetPasswordResponse = {
+  message: string;
+};
+
 type SavedRefreshToken = {
   id: string;
   tokenHash: string;
@@ -65,6 +75,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
+    private readonly mailService: MailService,
   ) {}
 
   private getEnvValue(name: string, fallback: string): string {
@@ -112,13 +123,6 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    /**
-     * We create the user ID before saving the user.
-     * This allows us to upload files into a clean folder structure:
-     *
-     * users/{userId}/verification/nic/...
-     * users/{userId}/verification/selfie/...
-     */
     const userId = crypto.randomUUID();
 
     const nicImage = files?.nicImage?.[0];
@@ -281,6 +285,128 @@ export class AuthService {
     };
   }
 
+  async forgotPassword(email: string): Promise<ForgotPasswordResponse> {
+    const successMessage =
+      'If an account with that email exists, a password reset link has been sent.';
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    });
+
+    /**
+     * Important security behavior:
+     * Always return the same response, even if the email does not exist.
+     * This prevents attackers from checking which emails are registered.
+     */
+    if (!user) {
+      return {
+        message: successMessage,
+      };
+    }
+
+    const rawToken = this.generatePasswordResetToken();
+    const tokenHash = this.hashPasswordResetToken(rawToken);
+
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    /**
+     * Optional cleanup:
+     * Delete old unused reset tokens for this user before creating a new one.
+     */
+    await this.prisma.passwordResetToken.deleteMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
+      },
+    });
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        tokenHash,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL;
+
+    if (!frontendUrl) {
+      throw new BadRequestException('FRONTEND_URL is missing in .env file');
+    }
+
+    const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+    await this.mailService.sendPasswordResetEmail(user.email, resetLink);
+
+    return {
+      message: successMessage,
+    };
+  }
+
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<ResetPasswordResponse> {
+    const tokenHash = this.hashPasswordResetToken(token);
+
+    const resetToken = await this.prisma.passwordResetToken.findUnique({
+      where: {
+        tokenHash,
+      },
+    });
+
+    if (!resetToken) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    if (resetToken.usedAt) {
+      throw new BadRequestException('Reset token has already been used');
+    }
+
+    if (resetToken.expiresAt < new Date()) {
+      throw new BadRequestException('Reset token has expired');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: {
+          id: resetToken.userId,
+        },
+        data: {
+          password: hashedPassword,
+        },
+      }),
+
+      this.prisma.passwordResetToken.update({
+        where: {
+          id: resetToken.id,
+        },
+        data: {
+          usedAt: new Date(),
+        },
+      }),
+
+      /**
+       * Important:
+       * Remove old refresh tokens so old logged-in sessions are invalidated
+       * after password reset.
+       */
+      this.prisma.refreshToken.deleteMany({
+        where: {
+          userId: resetToken.userId,
+        },
+      }),
+    ]);
+
+    return {
+      message: 'Password has been reset successfully',
+    };
+  }
+
   private async saveRefreshToken(
     userId: string,
     refreshToken: string,
@@ -348,5 +474,13 @@ export class AuthService {
       .createHmac('sha256', secret)
       .update(normalizedNic)
       .digest('hex');
+  }
+
+  private generatePasswordResetToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  private hashPasswordResetToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
   }
 }
