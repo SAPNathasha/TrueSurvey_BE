@@ -14,6 +14,28 @@ enum UserRole {
   BOTH
 }
 
+enum SurveyStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum SurveyAudienceType {
+  GENERAL
+  CUSTOMERS
+  VISITORS
+  EMPLOYEES
+  VERIFIED_USERS_ONLY
+}
+
+enum NotificationType {
+  RESPONSE
+  SURVEY
+  REPORT
+  SYSTEM
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -25,8 +47,18 @@ model User {
   nicImagePath String?
   selfiePath   String?
 
-  refreshTokens       RefreshToken[]
+  profileImagePath String?
+  isEmailVerified  Boolean @default(false)
+
+  refreshTokens RefreshToken[]
+
   passwordResetTokens PasswordResetToken[]
+
+  createdSurveys Survey[]
+
+  surveyResponses SurveyResponse[]
+
+  notifications Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -51,6 +83,55 @@ model PasswordResetToken {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Survey {
+  id          String             @id @default(uuid())
+  title       String
+  description String?
+  status      SurveyStatus       @default(DRAFT)
+  audience    SurveyAudienceType @default(GENERAL)
+
+  creatorId String
+  creator   User   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  responses SurveyResponse[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([creatorId])
+  @@index([status])
+}
+
+model SurveyResponse {
+  id String @id @default(uuid())
+
+  surveyId String
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  participantId String?
+  participant   User?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([surveyId])
+  @@index([participantId])
+}
+
+model Notification {
+  id      String           @id @default(uuid())
+  title   String
+  message String?
+  type    NotificationType @default(SYSTEM)
+  isRead  Boolean          @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
 
   @@index([userId])
 }
