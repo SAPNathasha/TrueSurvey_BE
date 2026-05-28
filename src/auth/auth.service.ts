@@ -14,7 +14,6 @@ type LoginResponse = {
   refreshToken: string;
   user: {
     id: string;
-    email: string;
     fullName: string | null;
     role: string;
   };
@@ -60,8 +59,7 @@ export class AuthService {
     }
 
     const payload: TokenPayload = {
-      sub: user.id, //public id or?
-      email: user.email, //don't want to pass email
+      sub: user.id,
       role: user.role,
     };
 
@@ -76,7 +74,6 @@ export class AuthService {
       refreshToken,
       user: {
         id: user.id,
-        email: user.email,
         fullName: user.fullName,
         role: user.role,
       },
@@ -121,7 +118,6 @@ export class AuthService {
 
     const payload: TokenPayload = {
       sub: user.id,
-      email: user.email,
       role: user.role,
     };
 
