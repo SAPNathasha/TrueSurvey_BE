@@ -2,126 +2,93 @@ import {
   Body,
   Controller,
   Post,
-  Req,
-  Res,
-  UnauthorizedException,
+  UploadedFiles,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import type { Request, Response } from 'express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import type { Express } from 'express';
+import { extname } from 'path';
 
 import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import type { TokenPayload } from './types/token-payload.type';
 
 @Controller('auth')
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-    private readonly jwtService: JwtService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
-  private getBearerToken(request: Request): string {
-    const authHeader = request.headers.authorization;
+  @Post('register')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'nicImage', maxCount: 1 },
+        { name: 'selfieImage', maxCount: 1 },
+      ],
+      {
+        storage: diskStorage({
+          destination: './uploads/auth',
+          filename: (req, file, callback) => {
+            const uniqueSuffix = `${Date.now()}-${Math.round(
+              Math.random() * 1e9,
+            )}`;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Refresh token not found');
-    }
+            const fileExtension = extname(file.originalname);
 
-    return authHeader.split(' ')[1];
+            callback(null, `${file.fieldname}-${uniqueSuffix}${fileExtension}`);
+          },
+        }),
+
+        fileFilter: (req, file, callback) => {
+          const allowedMimeTypes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
+          ];
+
+          if (!allowedMimeTypes.includes(file.mimetype)) {
+            return callback(
+              new BadRequestException(
+                'Only JPG, JPEG, PNG, and WEBP images are allowed',
+              ),
+              false,
+            );
+          }
+
+          callback(null, true);
+        },
+
+        limits: {
+          fileSize: 5 * 1024 * 1024, // 5MB per image
+        },
+      },
+    ),
+  )
+  register(
+    @Body() registerDto: RegisterDto,
+    @UploadedFiles()
+    files?: {
+      nicImage?: Express.Multer.File[];
+      selfieImage?: Express.Multer.File[];
+    },
+  ) {
+    return this.authService.register(registerDto, files);
   }
 
   @Post('login')
-  async login(
-    @Body() loginDto: LoginDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const result = await this.authService.login(loginDto);
-
-    // Access token is saved as an HTTP-only cookie
-    response.cookie('accessToken', result.accessToken, {
-      httpOnly: true,
-      secure: false, // true in production with HTTPS
-      sameSite: 'lax',
-      maxAge: 5 * 60 * 1000, // 5 minutes
-    });
-
-    // Refresh token is returned to frontend
-    // Frontend should send it later as Bearer token
-    return {
-      message: result.message,
-      refreshToken: result.refreshToken,
-      user: result.user,
-    };
+  login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
   }
 
   @Post('refresh')
-  async refresh(
-    @Req() request: Request,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const refreshToken = this.getBearerToken(request);
-
-    let payload: TokenPayload;
-
-    try {
-      payload = await this.jwtService.verifyAsync<TokenPayload>(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET,
-      });
-    } catch {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    const result = await this.authService.refreshTokens(
-      payload.sub,
-      refreshToken,
-    );
-
-    // New access token goes to cookie again
-    response.cookie('accessToken', result.accessToken, {
-      httpOnly: true,
-      secure: false, // true in production
-      sameSite: 'lax',
-      maxAge: 5 * 60 * 1000,
-    });
-
-    return {
-      message: 'Token refreshed successfully',
-      refreshToken: result.refreshToken,
-    };
+  refresh(@Body() body: { userId: string; refreshToken: string }) {
+    return this.authService.refreshTokens(body.userId, body.refreshToken);
   }
 
   @Post('logout')
-  async logout(
-    @Req() request: Request,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    let refreshToken: string | undefined;
-
-    try {
-      refreshToken = this.getBearerToken(request);
-    } catch {
-      refreshToken = undefined;
-    }
-
-    if (refreshToken) {
-      try {
-        const payload = await this.jwtService.verifyAsync<TokenPayload>(
-          refreshToken,
-          {
-            secret: process.env.JWT_REFRESH_SECRET,
-          },
-        );
-
-        await this.authService.logout(payload.sub);
-      } catch {
-        // Even if refresh token is invalid, clear access token cookie
-      }
-    }
-
-    response.clearCookie('accessToken');
-
-    return {
-      message: 'Logout successful',
-    };
+  logout(@Body() body: { userId: string }) {
+    return this.authService.logout(body.userId);
   }
 }

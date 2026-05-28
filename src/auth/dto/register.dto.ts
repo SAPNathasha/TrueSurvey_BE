@@ -2,38 +2,32 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsOptional,
   IsString,
-  Matches,
-  MaxLength,
   MinLength,
 } from 'class-validator';
-
-export enum UserRole {
-  PARTICIPANT = 'participant',
-  SURVEY_CREATOR = 'survey_creator',
-  BOTH = 'both',
-}
+import { Transform } from 'class-transformer';
+import { UserRole } from '../../generated/prisma/enums';
 
 export class RegisterDto {
   @IsString()
   @IsNotEmpty()
-  @MinLength(3)
-  @MaxLength(30)
-  @Matches(/^\S*$/, {
-    message: 'Username cannot contain spaces',
-  })
-  username: string | undefined;
+  username: string;
 
   @IsEmail()
-  email: string | undefined;
+  @Transform(({ value }) => String(value).toLowerCase().trim())
+  email: string;
 
   @IsString()
-  @MinLength(8)
-  @MaxLength(50)
-  password: string | undefined;
+  @MinLength(6)
+  password: string;
 
   @IsEnum(UserRole, {
-    message: 'Role must be participant, survey_creator, or both',
+    message: 'role must be PARTICIPANT, CREATOR, or BOTH',
   })
-  role: UserRole | undefined;
+  role: UserRole;
+
+  @IsOptional()
+  @IsString()
+  nicNumber?: string;
 }

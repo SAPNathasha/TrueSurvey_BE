@@ -15,11 +15,16 @@ enum UserRole {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  password      String
-  fullName      String?
-  role          UserRole
+  id       String   @id @default(uuid())
+  username String   @default("existing_user")
+  email    String   @unique
+  password String
+  role     UserRole
+
+  nicHash      String? @unique
+  nicImagePath String?
+  selfiePath   String?
+
   refreshTokens RefreshToken[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt

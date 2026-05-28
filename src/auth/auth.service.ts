@@ -1,12 +1,26 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
-import type { StringValue } from 'ms';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 
 import { PrismaService } from './prisma/prisma.service';
+import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import type { TokenPayload } from './types/token-payload.type';
+import { UserRole } from '../generated/prisma/enums';
+
+type UploadedFile = {
+  path: string;
+};
+
+type TokenPayload = {
+  sub: string;
+  role: UserRole;
+};
 
 type LoginResponse = {
   message: string;
@@ -14,8 +28,9 @@ type LoginResponse = {
   refreshToken: string;
   user: {
     id: string;
-    fullName: string | null;
-    role: string;
+    username: string;
+    email: string;
+    role: UserRole;
   };
 };
 
@@ -32,12 +47,89 @@ type SavedRefreshToken = {
   createdAt: Date;
 };
 
+type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
+
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
   ) {}
+
+  private getEnvValue(name: string, fallback: string): string {
+    return process.env[name] ?? fallback;
+  }
+
+  private getJwtExpiresIn(name: string, fallback: string): JwtExpiresIn {
+    return this.getEnvValue(name, fallback) as JwtExpiresIn;
+  }
+
+  async register(
+    registerDto: RegisterDto,
+    files?: {
+      nicImage?: UploadedFile[];
+      selfieImage?: UploadedFile[];
+    },
+  ) {
+    const { username, email, password, role, nicNumber } = registerDto;
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    let nicHash: string | null = null;
+
+    if (nicNumber) {
+      nicHash = this.hashNic(nicNumber);
+
+      const existingNicUser = await this.prisma.user.findUnique({
+        where: {
+          nicHash,
+        },
+      });
+
+      if (existingNicUser) {
+        throw new ConflictException('This NIC is already registered');
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const nicImagePath: string | null = files?.nicImage?.[0]?.path ?? null;
+    const selfiePath: string | null = files?.selfieImage?.[0]?.path ?? null;
+
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        email,
+        password: hashedPassword,
+        role,
+        nicHash,
+        nicImagePath,
+        selfiePath,
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        nicImagePath: true,
+        selfiePath: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      message: 'Registration successful',
+      user,
+    };
+  }
 
   async login(loginDto: LoginDto): Promise<LoginResponse> {
     const { email, password } = loginDto;
@@ -74,7 +166,8 @@ export class AuthService {
       refreshToken,
       user: {
         id: user.id,
-        fullName: user.fullName,
+        username: user.username,
+        email: user.email,
         role: user.role,
       },
     };
@@ -187,26 +280,35 @@ export class AuthService {
   }
 
   private async generateAccessToken(payload: TokenPayload): Promise<string> {
-    const expiresIn: StringValue =
-      (process.env.ACCESS_TOKEN_EXPIRES_IN as StringValue | undefined) ?? '5m';
-
     const options: JwtSignOptions = {
-      secret: process.env.JWT_ACCESS_SECRET ?? 'access_secret',
-      expiresIn,
+      secret: this.getEnvValue('JWT_ACCESS_SECRET', 'access_secret'),
+      expiresIn: this.getJwtExpiresIn('ACCESS_TOKEN_EXPIRES_IN', '5m'),
     };
 
     return this.jwtService.signAsync(payload, options);
   }
 
   private async generateRefreshToken(payload: TokenPayload): Promise<string> {
-    const expiresIn: StringValue =
-      (process.env.REFRESH_TOKEN_EXPIRES_IN as StringValue | undefined) ?? '7d';
-
     const options: JwtSignOptions = {
-      secret: process.env.JWT_REFRESH_SECRET ?? 'refresh_secret',
-      expiresIn,
+      secret: this.getEnvValue('JWT_REFRESH_SECRET', 'refresh_secret'),
+      expiresIn: this.getJwtExpiresIn('REFRESH_TOKEN_EXPIRES_IN', '7d'),
     };
 
     return this.jwtService.signAsync(payload, options);
+  }
+
+  private hashNic(nicNumber: string): string {
+    const secret = process.env.NIC_HASH_SECRET;
+
+    if (!secret) {
+      throw new Error('NIC_HASH_SECRET is missing in .env file');
+    }
+
+    const normalizedNic = nicNumber.trim().toUpperCase();
+
+    return crypto
+      .createHmac('sha256', secret)
+      .update(normalizedNic)
+      .digest('hex');
   }
 }
