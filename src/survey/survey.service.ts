@@ -9,13 +9,17 @@ import { CreateSurveyBasicDetailsDto } from './dto/create-survey-basic-details.d
 import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
 import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
+import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 
 import {
+  AudienceGender,
+  SurveyAudienceType,
   SurveyCreationMethod,
   SurveyCreationStep,
   SurveyQuestionSource,
   SurveyQuestionType,
   SurveyStatus,
+  UserRole,
 } from '../generated/prisma/enums';
 
 type GeneratedQuestion = {
@@ -51,7 +55,7 @@ export class SurveyService {
       throw new BadRequestException('Creator not found');
     }
 
-    if (creator.role !== 'CREATOR' && creator.role !== 'BOTH') {
+    if (creator.role !== UserRole.CREATOR && creator.role !== UserRole.BOTH) {
       throw new ForbiddenException('Only creators can create surveys');
     }
 
@@ -488,6 +492,110 @@ export class SurveyService {
     };
   }
 
+  async setTargetAudience(
+    creatorId: string,
+    surveyId: string,
+    dto: SetTargetAudienceDto,
+  ) {
+    const survey = await this.validateEditableSurveyForCreator({
+      creatorId,
+      surveyId,
+    });
+
+    const questionCount = await this.prisma.surveyQuestion.count({
+      where: {
+        surveyId,
+      },
+    });
+
+    if (questionCount === 0) {
+      throw new BadRequestException(
+        'Please add questions before setting target audience',
+      );
+    }
+
+    if (
+      dto.minimumAge !== undefined &&
+      dto.maximumAge !== undefined &&
+      dto.minimumAge > dto.maximumAge
+    ) {
+      throw new BadRequestException(
+        'Minimum age cannot be greater than maximum age',
+      );
+    }
+
+    const estimatedReach = await this.estimateAudienceReach(dto);
+
+    const targetAudience = await this.prisma.surveyTargetAudience.upsert({
+      where: {
+        surveyId,
+      },
+      create: {
+        surveyId,
+        minimumAge: dto.minimumAge,
+        maximumAge: dto.maximumAge,
+        gender: dto.gender ?? AudienceGender.ALL,
+        city: dto.city,
+        district: dto.district,
+        educationLevel: dto.educationLevel,
+        occupation: dto.occupation,
+        sampleBase: dto.sampleBase,
+        estimatedReach,
+      },
+      update: {
+        minimumAge: dto.minimumAge,
+        maximumAge: dto.maximumAge,
+        gender: dto.gender ?? AudienceGender.ALL,
+        city: dto.city,
+        district: dto.district,
+        educationLevel: dto.educationLevel,
+        occupation: dto.occupation,
+        sampleBase: dto.sampleBase,
+        estimatedReach,
+      },
+      select: {
+        id: true,
+        minimumAge: true,
+        maximumAge: true,
+        gender: true,
+        city: true,
+        district: true,
+        educationLevel: true,
+        occupation: true,
+        sampleBase: true,
+        estimatedReach: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const updatedSurvey = await this.prisma.survey.update({
+      where: {
+        id: survey.id,
+      },
+      data: {
+        audience: dto.sampleBase,
+        currentStep: SurveyCreationStep.SAMPLE_BUDGET,
+      },
+      select: {
+        id: true,
+        title: true,
+        audience: true,
+        currentStep: true,
+        status: true,
+        creationMethod: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Target audience saved successfully',
+      survey: updatedSurvey,
+      targetAudience,
+      nextStep: 'SAMPLE_BUDGET',
+    };
+  }
+
   private async validateEditableSurveyForCreator(params: {
     creatorId: string;
     surveyId: string;
@@ -589,6 +697,34 @@ export class SurveyService {
             optionText: true,
             order: true,
           },
+        },
+      },
+    });
+  }
+
+  private async estimateAudienceReach(
+    dto: SetTargetAudienceDto,
+  ): Promise<number> {
+    if (dto.sampleBase === SurveyAudienceType.VERIFIED_USERS_ONLY) {
+      return this.prisma.user.count({
+        where: {
+          role: {
+            in: [UserRole.PARTICIPANT, UserRole.BOTH],
+          },
+          nicImagePath: {
+            not: null,
+          },
+          selfiePath: {
+            not: null,
+          },
+        },
+      });
+    }
+
+    return this.prisma.user.count({
+      where: {
+        role: {
+          in: [UserRole.PARTICIPANT, UserRole.BOTH],
         },
       },
     });

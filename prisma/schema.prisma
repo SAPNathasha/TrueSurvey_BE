@@ -90,6 +90,13 @@ enum AiToneStyle {
   CASUAL
 }
 
+enum AudienceGender {
+  ALL
+  MALE
+  FEMALE
+  OTHER
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -162,6 +169,8 @@ model Survey {
 
   questions SurveyQuestion[]
   responses SurveyResponse[]
+
+  targetAudience SurveyTargetAudience?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -236,4 +245,33 @@ model SurveyQuestionOption {
   createdAt DateTime @default(now())
 
   @@index([questionId])
+}
+
+model SurveyTargetAudience {
+  id String @id @default(uuid())
+
+  surveyId String @unique
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  minimumAge Int?
+  maximumAge Int?
+
+  gender AudienceGender @default(ALL)
+
+  city     String?
+  district String?
+
+  educationLevel String?
+  occupation     String?
+
+  sampleBase SurveyAudienceType @default(GENERAL)
+
+  estimatedReach Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sampleBase])
+  @@index([city])
+  @@index([district])
 }

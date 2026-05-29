@@ -15,6 +15,7 @@ import { SelectSurveyMethodDto } from './dto/select-survey-method.dto';
 import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
 import { CreatorIdDto } from './dto/creator-id.dto';
+import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 
 @Controller('surveys')
 export class SurveyController {
@@ -90,5 +91,12 @@ export class SurveyController {
       surveyId,
       questionId,
     );
+  }
+  @Patch(':surveyId/target-audience')
+  setTargetAudience(
+    @Param('surveyId') surveyId: string,
+    @Body() body: SetTargetAudienceDto,
+  ) {
+    return this.surveyService.setTargetAudience(body.creatorId, surveyId, body);
   }
 }
