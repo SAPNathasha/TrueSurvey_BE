@@ -62,6 +62,34 @@ enum SurveyCreationMethod {
   MANUAL
 }
 
+enum SurveyQuestionType {
+  MULTIPLE_CHOICE
+  SINGLE_SELECT
+  RATING_SCALE
+  SHORT_ANSWER
+  LONG_ANSWER
+  YES_NO
+}
+
+enum SurveyQuestionSource {
+  AI_GENERATED
+  MANUAL
+}
+
+enum AiAnswerStyle {
+  MULTIPLE_CHOICE
+  SINGLE_SELECT
+  RATING_SCALE
+  MIXED
+}
+
+enum AiToneStyle {
+  PROFESSIONAL_FRIENDLY
+  SIMPLE_CLEAR
+  ACADEMIC
+  CASUAL
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -132,6 +160,7 @@ model Survey {
   creatorId String
   creator   User   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
 
+  questions SurveyQuestion[]
   responses SurveyResponse[]
 
   createdAt DateTime @default(now())
@@ -155,6 +184,43 @@ model SurveyResponse {
 
   @@index([surveyId])
   @@index([participantId])
+}
+
+model SurveyQuestion {
+  id String @id @default(uuid())
+
+  surveyId String
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  questionText String
+  type         SurveyQuestionType
+  source       SurveyQuestionSource @default(AI_GENERATED)
+
+  order Int
+
+  isRequired Boolean @default(true)
+
+  options SurveyQuestionOption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([surveyId])
+  @@index([type])
+}
+
+model SurveyQuestionOption {
+  id String @id @default(uuid())
+
+  questionId String
+  question   SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  optionText String
+  order      Int
+
+  createdAt DateTime @default(now())
+
+  @@index([questionId])
 }
 
 model Notification {
