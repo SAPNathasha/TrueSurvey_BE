@@ -143,6 +143,12 @@ model User {
   password String
   role     UserRole
 
+  fullName String?
+
+  phoneCountryCode String?
+  phoneNumber      String?
+  dateOfBirth      DateTime?
+
   nicHash      String? @unique
   nicImagePath String?
   selfiePath   String?
@@ -166,6 +172,7 @@ model User {
   participantDistrict       String?
   participantEducationLevel String?
   participantOccupation     String?
+  participantAddress        String?
 
   wallet             ParticipantWallet?
   walletTransactions WalletTransaction[]

@@ -7,6 +7,9 @@ import {
 import { PrismaService } from '../auth/prisma/prisma.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
+import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
+import { StorageService } from '../auth/storage/storage.service';
+import type { Express } from 'express';
 
 import {
   AudienceGender,
@@ -115,8 +118,245 @@ type WalletTableRow = {
 
 @Injectable()
 export class ParticipantService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageService: StorageService,
+  ) {}
 
+  async getProfileSettings(participantId: string) {
+    if (!participantId) {
+      throw new BadRequestException('participantId is required');
+    }
+
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: participantId,
+      },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        email: true,
+        role: true,
+
+        phoneCountryCode: true,
+        phoneNumber: true,
+        dateOfBirth: true,
+
+        profileImagePath: true,
+        isEmailVerified: true,
+
+        nicImagePath: true,
+        selfiePath: true,
+
+        participantAge: true,
+        participantGender: true,
+        participantCity: true,
+        participantDistrict: true,
+        participantEducationLevel: true,
+        participantOccupation: true,
+        participantAddress: true,
+
+        createdAt: true,
+
+        surveyResponses: {
+          where: {
+            status: SurveyResponseStatus.COMPLETED,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can access profile settings',
+      );
+    }
+
+    const isVerified = Boolean(
+      participant.nicImagePath && participant.selfiePath,
+    );
+
+    return {
+      profile: {
+        id: participant.id,
+        username: participant.username,
+        fullName: participant.fullName,
+        email: participant.email,
+
+        phoneCountryCode: participant.phoneCountryCode,
+        phoneNumber: participant.phoneNumber,
+        dateOfBirth: participant.dateOfBirth,
+
+        profileImagePath: participant.profileImagePath,
+
+        participantAge: participant.participantAge,
+        participantGender: participant.participantGender,
+        participantCity: participant.participantCity,
+        participantDistrict: participant.participantDistrict,
+        participantEducationLevel: participant.participantEducationLevel,
+        participantOccupation: participant.participantOccupation,
+        participantAddress: participant.participantAddress,
+      },
+
+      accountOverview: {
+        memberSince: participant.createdAt,
+        accountStatus: 'ACTIVE',
+        emailVerified: participant.isEmailVerified,
+        verificationStatus: isVerified ? 'VERIFIED' : 'NOT_VERIFIED',
+        totalSurveysCompleted: participant.surveyResponses.length,
+      },
+    };
+  }
+
+  async updateProfileSettings(dto: UpdateParticipantProfileDto) {
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: dto.participantId,
+      },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can update profile settings',
+      );
+    }
+
+    const dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined;
+
+    const updatedParticipant = await this.prisma.user.update({
+      where: {
+        id: dto.participantId,
+      },
+      data: {
+        fullName: dto.fullName,
+        username: dto.username,
+
+        phoneCountryCode: dto.phoneCountryCode,
+        phoneNumber: dto.phoneNumber,
+        dateOfBirth,
+
+        participantAge: dto.participantAge,
+        participantGender: dto.participantGender,
+        participantCity: dto.participantCity,
+        participantDistrict: dto.participantDistrict,
+        participantEducationLevel: dto.participantEducationLevel,
+        participantOccupation: dto.participantOccupation,
+        participantAddress: dto.participantAddress,
+      },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        email: true,
+
+        phoneCountryCode: true,
+        phoneNumber: true,
+        dateOfBirth: true,
+
+        profileImagePath: true,
+
+        participantAge: true,
+        participantGender: true,
+        participantCity: true,
+        participantDistrict: true,
+        participantEducationLevel: true,
+        participantOccupation: true,
+        participantAddress: true,
+
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Profile settings updated successfully',
+      profile: updatedParticipant,
+    };
+  }
+
+  async updateProfilePhoto(
+    participantId: string,
+    profilePhoto?: Express.Multer.File,
+  ) {
+    if (!participantId) {
+      throw new BadRequestException('participantId is required');
+    }
+
+    if (!profilePhoto) {
+      throw new BadRequestException('profilePhoto is required');
+    }
+
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: participantId,
+      },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can update profile photo',
+      );
+    }
+
+    const profileImageUrl = await this.storageService.uploadImage(
+      profilePhoto,
+      `users/${participantId}/profile`,
+    );
+
+    const updatedParticipant = await this.prisma.user.update({
+      where: {
+        id: participantId,
+      },
+      data: {
+        profileImagePath: profileImageUrl,
+      },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        email: true,
+        profileImagePath: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Profile photo updated successfully',
+      profile: updatedParticipant,
+    };
+  }
   async getDashboard(participantId: string) {
     if (!participantId) {
       throw new BadRequestException('participantId is required');
