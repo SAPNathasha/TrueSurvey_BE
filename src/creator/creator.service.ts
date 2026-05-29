@@ -100,11 +100,11 @@ export class CreatorService {
           title: true,
           description: true,
           status: true,
-          audience: true,
+          category: true,
           updatedAt: true,
-          _count: {
+          responses: {
             select: {
-              responses: true,
+              id: true,
             },
           },
         },
@@ -169,8 +169,8 @@ export class CreatorService {
         title: survey.title,
         description: survey.description,
         status: survey.status,
-        audience: survey.audience,
-        responseCount: survey._count.responses,
+        category: survey.category,
+        responseCount: survey.responses.length,
         updatedAt: survey.updatedAt,
       })),
     };
@@ -207,12 +207,18 @@ export class CreatorService {
       date.setDate(thirtyDaysAgo.getDate() + i);
 
       const key = date.toISOString().split('T')[0];
-      responseMap.set(key, 0);
+
+      if (key) {
+        responseMap.set(key, 0);
+      }
     }
 
     for (const response of responses) {
       const key = response.createdAt.toISOString().split('T')[0];
-      responseMap.set(key, (responseMap.get(key) ?? 0) + 1);
+
+      if (key) {
+        responseMap.set(key, (responseMap.get(key) ?? 0) + 1);
+      }
     }
 
     return Array.from(responseMap.entries()).map(([date, responsesCount]) => ({

@@ -1,6 +1,6 @@
 import {
   NotificationType,
-  SurveyAudienceType,
+  SurveyCategory,
   SurveyStatus,
 } from '../../generated/prisma/enums';
 
@@ -54,7 +54,7 @@ export type CreatorDashboardResponse = {
     title: string;
     description: string | null;
     status: SurveyStatus;
-    audience: SurveyAudienceType;
+    category: SurveyCategory;
     responseCount: number;
     updatedAt: Date;
   }[];

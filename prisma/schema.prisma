@@ -36,6 +36,27 @@ enum NotificationType {
   SYSTEM
 }
 
+enum SurveyCategory {
+  CUSTOMER_FEEDBACK
+  MARKET_RESEARCH
+  EMPLOYEE_ENGAGEMENT
+  EDUCATION
+  HEALTHCARE
+  PRODUCT_RESEARCH
+  EVENT_FEEDBACK
+  OTHER
+}
+
+enum SurveyCreationStep {
+  BASIC_DETAILS
+  SELECT_METHOD
+  CREATE_QUESTIONS
+  TARGET_AUDIENCE
+  SAMPLE_BUDGET
+  PREVIEW_SUBMIT
+  COMPLETED
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -88,11 +109,18 @@ model PasswordResetToken {
 }
 
 model Survey {
-  id          String             @id @default(uuid())
+  id          String @id @default(uuid())
   title       String
-  description String?
-  status      SurveyStatus       @default(DRAFT)
-  audience    SurveyAudienceType @default(GENERAL)
+  description String
+
+  category SurveyCategory
+  audience SurveyAudienceType @default(GENERAL)
+
+  status SurveyStatus @default(DRAFT)
+
+  estimatedCompletionDays Int
+
+  currentStep SurveyCreationStep @default(BASIC_DETAILS)
 
   creatorId String
   creator   User   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
@@ -104,6 +132,7 @@ model Survey {
 
   @@index([creatorId])
   @@index([status])
+  @@index([category])
 }
 
 model SurveyResponse {
