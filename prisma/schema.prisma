@@ -97,6 +97,15 @@ enum AudienceGender {
   OTHER
 }
 
+enum SurveyBudgetCurrency {
+  LKR
+  USD
+}
+
+enum RewardDistributionType {
+  EQUAL_PER_PARTICIPANT
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -171,6 +180,7 @@ model Survey {
   responses SurveyResponse[]
 
   targetAudience SurveyTargetAudience?
+  sampleBudget   SurveySampleBudget?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -274,4 +284,30 @@ model SurveyTargetAudience {
   @@index([sampleBase])
   @@index([city])
   @@index([district])
+}
+
+model SurveySampleBudget {
+  id String @id @default(uuid())
+
+  surveyId String @unique
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  requiredResponses Int
+
+  totalBudget Decimal @db.Decimal(12, 2)
+
+  platformCommissionPercentage Decimal @db.Decimal(5, 2)
+  platformCommissionAmount     Decimal @db.Decimal(12, 2)
+
+  participantRewardBudget Decimal @db.Decimal(12, 2)
+  rewardPerParticipant    Decimal @db.Decimal(12, 2)
+
+  rewardDistribution RewardDistributionType @default(EQUAL_PER_PARTICIPANT)
+
+  currency SurveyBudgetCurrency @default(LKR)
+
+  budgetNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

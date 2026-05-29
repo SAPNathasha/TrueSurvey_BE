@@ -10,10 +10,15 @@ import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
 import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
+import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
+
+import { Prisma } from '../generated/prisma/client';
 
 import {
   AudienceGender,
+  RewardDistributionType,
   SurveyAudienceType,
+  SurveyBudgetCurrency,
   SurveyCreationMethod,
   SurveyCreationStep,
   SurveyQuestionSource,
@@ -593,6 +598,154 @@ export class SurveyService {
       survey: updatedSurvey,
       targetAudience,
       nextStep: 'SAMPLE_BUDGET',
+    };
+  }
+
+  async setSampleBudget(
+    creatorId: string,
+    surveyId: string,
+    dto: SetSampleBudgetDto,
+  ) {
+    const survey = await this.validateEditableSurveyForCreator({
+      creatorId,
+      surveyId,
+    });
+
+    const targetAudience = await this.prisma.surveyTargetAudience.findUnique({
+      where: {
+        surveyId,
+      },
+      select: {
+        id: true,
+        estimatedReach: true,
+      },
+    });
+
+    if (!targetAudience) {
+      throw new BadRequestException(
+        'Please set target audience before setting sample size and budget',
+      );
+    }
+
+    if (dto.requiredResponses <= 0) {
+      throw new BadRequestException(
+        'Required responses must be greater than 0',
+      );
+    }
+
+    if (dto.totalBudget <= 0) {
+      throw new BadRequestException('Total budget must be greater than 0');
+    }
+
+    if (
+      targetAudience.estimatedReach !== null &&
+      targetAudience.estimatedReach !== undefined &&
+      targetAudience.estimatedReach > 0 &&
+      dto.requiredResponses > targetAudience.estimatedReach
+    ) {
+      throw new BadRequestException(
+        'Required responses cannot be greater than estimated audience reach',
+      );
+    }
+
+    const platformCommissionAmount =
+      (dto.totalBudget * dto.platformCommissionPercentage) / 100;
+
+    const participantRewardBudget = dto.totalBudget - platformCommissionAmount;
+
+    if (participantRewardBudget <= 0) {
+      throw new BadRequestException(
+        'Participant reward budget must be greater than 0',
+      );
+    }
+
+    const rewardPerParticipant =
+      participantRewardBudget / dto.requiredResponses;
+
+    const rewardDistribution =
+      dto.rewardDistribution ?? RewardDistributionType.EQUAL_PER_PARTICIPANT;
+
+    const currency = dto.currency ?? SurveyBudgetCurrency.LKR;
+
+    const sampleBudget = await this.prisma.surveySampleBudget.upsert({
+      where: {
+        surveyId,
+      },
+      create: {
+        surveyId,
+        requiredResponses: dto.requiredResponses,
+        totalBudget: new Prisma.Decimal(dto.totalBudget),
+        platformCommissionPercentage: new Prisma.Decimal(
+          dto.platformCommissionPercentage,
+        ),
+        platformCommissionAmount: new Prisma.Decimal(platformCommissionAmount),
+        participantRewardBudget: new Prisma.Decimal(participantRewardBudget),
+        rewardPerParticipant: new Prisma.Decimal(rewardPerParticipant),
+        rewardDistribution,
+        currency,
+        budgetNotes: dto.budgetNotes,
+      },
+      update: {
+        requiredResponses: dto.requiredResponses,
+        totalBudget: new Prisma.Decimal(dto.totalBudget),
+        platformCommissionPercentage: new Prisma.Decimal(
+          dto.platformCommissionPercentage,
+        ),
+        platformCommissionAmount: new Prisma.Decimal(platformCommissionAmount),
+        participantRewardBudget: new Prisma.Decimal(participantRewardBudget),
+        rewardPerParticipant: new Prisma.Decimal(rewardPerParticipant),
+        rewardDistribution,
+        currency,
+        budgetNotes: dto.budgetNotes,
+      },
+      select: {
+        id: true,
+        requiredResponses: true,
+        totalBudget: true,
+        platformCommissionPercentage: true,
+        platformCommissionAmount: true,
+        participantRewardBudget: true,
+        rewardPerParticipant: true,
+        rewardDistribution: true,
+        currency: true,
+        budgetNotes: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const updatedSurvey = await this.prisma.survey.update({
+      where: {
+        id: survey.id,
+      },
+      data: {
+        currentStep: SurveyCreationStep.PREVIEW_SUBMIT,
+      },
+      select: {
+        id: true,
+        title: true,
+        currentStep: true,
+        status: true,
+        creationMethod: true,
+        audience: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Sample size and budget saved successfully',
+      survey: updatedSurvey,
+      sampleBudget,
+      budgetBreakdown: {
+        totalBudget: dto.totalBudget,
+        platformCommissionPercentage: dto.platformCommissionPercentage,
+        platformCommissionAmount,
+        participantRewardBudget,
+        requiredResponses: dto.requiredResponses,
+        rewardPerParticipant,
+        currency,
+      },
+      nextStep: 'PREVIEW_SUBMIT',
     };
   }
 

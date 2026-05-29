@@ -16,6 +16,7 @@ import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
 import { CreatorIdDto } from './dto/creator-id.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
+import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
 
 @Controller('surveys')
 export class SurveyController {
@@ -98,5 +99,12 @@ export class SurveyController {
     @Body() body: SetTargetAudienceDto,
   ) {
     return this.surveyService.setTargetAudience(body.creatorId, surveyId, body);
+  }
+  @Patch(':surveyId/sample-budget')
+  setSampleBudget(
+    @Param('surveyId') surveyId: string,
+    @Body() body: SetSampleBudgetDto,
+  ) {
+    return this.surveyService.setSampleBudget(body.creatorId, surveyId, body);
   }
 }
