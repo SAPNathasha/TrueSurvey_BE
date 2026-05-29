@@ -106,6 +106,12 @@ enum RewardDistributionType {
   EQUAL_PER_PARTICIPANT
 }
 
+enum SurveyPublishOption {
+  PUBLISH_NOW
+  SCHEDULE
+  SAVE_DRAFT
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -181,6 +187,9 @@ model Survey {
 
   targetAudience SurveyTargetAudience?
   sampleBudget   SurveySampleBudget?
+
+  publishedAt        DateTime?
+  scheduledPublishAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

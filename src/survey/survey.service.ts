@@ -5,12 +5,14 @@ import {
 } from '@nestjs/common';
 
 import { PrismaService } from '../auth/prisma/prisma.service';
+
 import { CreateSurveyBasicDetailsDto } from './dto/create-survey-basic-details.dto';
 import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
 import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
+import { PublishSurveyDto } from './dto/publish-survey.dto';
 
 import { Prisma } from '../generated/prisma/client';
 
@@ -21,6 +23,7 @@ import {
   SurveyBudgetCurrency,
   SurveyCreationMethod,
   SurveyCreationStep,
+  SurveyPublishOption,
   SurveyQuestionSource,
   SurveyQuestionType,
   SurveyStatus,
@@ -101,41 +104,14 @@ export class SurveyService {
     surveyId: string,
     creationMethod: SurveyCreationMethod,
   ) {
-    if (!creatorId) {
-      throw new BadRequestException('creatorId is required');
-    }
-
-    if (!surveyId) {
-      throw new BadRequestException('surveyId is required');
-    }
-
-    const survey = await this.prisma.survey.findUnique({
-      where: {
-        id: surveyId,
-      },
-      select: {
-        id: true,
-        creatorId: true,
-        status: true,
-        currentStep: true,
-      },
+    const survey = await this.validateEditableSurveyForCreator({
+      creatorId,
+      surveyId,
     });
-
-    if (!survey) {
-      throw new BadRequestException('Survey not found');
-    }
-
-    if (survey.creatorId !== creatorId) {
-      throw new ForbiddenException('You cannot update this survey');
-    }
-
-    if (survey.status !== SurveyStatus.DRAFT) {
-      throw new BadRequestException('Only draft surveys can be edited');
-    }
 
     const updatedSurvey = await this.prisma.survey.update({
       where: {
-        id: surveyId,
+        id: survey.id,
       },
       data: {
         creationMethod,
@@ -749,6 +725,256 @@ export class SurveyService {
     };
   }
 
+  async getSurveyPreview(creatorId: string, surveyId: string) {
+    await this.validateEditableSurveyForCreator({
+      creatorId,
+      surveyId,
+    });
+
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        creatorId: true,
+        title: true,
+        description: true,
+        category: true,
+        audience: true,
+        status: true,
+        currentStep: true,
+        creationMethod: true,
+        estimatedCompletionDays: true,
+        createdAt: true,
+        updatedAt: true,
+
+        questions: {
+          orderBy: {
+            order: 'asc',
+          },
+          select: {
+            id: true,
+            questionText: true,
+            type: true,
+            source: true,
+            order: true,
+            isRequired: true,
+            options: {
+              orderBy: {
+                order: 'asc',
+              },
+              select: {
+                id: true,
+                optionText: true,
+                order: true,
+              },
+            },
+          },
+        },
+
+        targetAudience: {
+          select: {
+            minimumAge: true,
+            maximumAge: true,
+            gender: true,
+            city: true,
+            district: true,
+            educationLevel: true,
+            occupation: true,
+            sampleBase: true,
+            estimatedReach: true,
+          },
+        },
+
+        sampleBudget: {
+          select: {
+            requiredResponses: true,
+            totalBudget: true,
+            platformCommissionPercentage: true,
+            platformCommissionAmount: true,
+            participantRewardBudget: true,
+            rewardPerParticipant: true,
+            rewardDistribution: true,
+            currency: true,
+            budgetNotes: true,
+          },
+        },
+      },
+    });
+
+    if (!survey) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    const readiness = this.getSurveyReadinessChecklist(survey);
+
+    return {
+      survey,
+      readiness,
+      canPublish: Object.values(readiness).every(Boolean),
+    };
+  }
+
+  async publishSurvey(
+    creatorId: string,
+    surveyId: string,
+    dto: PublishSurveyDto,
+  ) {
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        creatorId: true,
+        status: true,
+        title: true,
+        description: true,
+        creationMethod: true,
+        questions: {
+          select: {
+            id: true,
+          },
+        },
+        targetAudience: {
+          select: {
+            id: true,
+          },
+        },
+        sampleBudget: {
+          select: {
+            id: true,
+            rewardPerParticipant: true,
+          },
+        },
+      },
+    });
+
+    if (!survey) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    if (survey.creatorId !== creatorId) {
+      throw new ForbiddenException('You cannot publish this survey');
+    }
+
+    if (survey.status !== SurveyStatus.DRAFT) {
+      throw new BadRequestException('Only draft surveys can be published');
+    }
+
+    const readiness = this.getSurveyReadinessChecklist(survey);
+
+    if (!Object.values(readiness).every(Boolean)) {
+      throw new BadRequestException({
+        message: 'Survey is not ready to publish',
+        readiness,
+      });
+    }
+
+    if (dto.publishOption === SurveyPublishOption.SAVE_DRAFT) {
+      const updatedSurvey = await this.prisma.survey.update({
+        where: {
+          id: surveyId,
+        },
+        data: {
+          status: SurveyStatus.DRAFT,
+          currentStep: SurveyCreationStep.PREVIEW_SUBMIT,
+        },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          currentStep: true,
+          updatedAt: true,
+        },
+      });
+
+      return {
+        message: 'Survey saved as draft',
+        survey: updatedSurvey,
+        readiness,
+      };
+    }
+
+    if (dto.publishOption === SurveyPublishOption.SCHEDULE) {
+      if (!dto.scheduledPublishAt) {
+        throw new BadRequestException('scheduledPublishAt is required');
+      }
+
+      const scheduledDate = new Date(dto.scheduledPublishAt);
+
+      if (scheduledDate <= new Date()) {
+        throw new BadRequestException(
+          'Scheduled publish date must be in the future',
+        );
+      }
+
+      const updatedSurvey = await this.prisma.survey.update({
+        where: {
+          id: surveyId,
+        },
+        data: {
+          status: SurveyStatus.DRAFT,
+          currentStep: SurveyCreationStep.COMPLETED,
+          scheduledPublishAt: scheduledDate,
+        },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          currentStep: true,
+          scheduledPublishAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return {
+        message: 'Survey scheduled successfully',
+        survey: updatedSurvey,
+        readiness,
+        nextStep: 'SCHEDULED',
+      };
+    }
+
+    const updatedSurvey = await this.prisma.survey.update({
+      where: {
+        id: surveyId,
+      },
+      data: {
+        status: SurveyStatus.ACTIVE,
+        currentStep: SurveyCreationStep.COMPLETED,
+        publishedAt: new Date(),
+        scheduledPublishAt: null,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        currentStep: true,
+        publishedAt: true,
+        updatedAt: true,
+      },
+    });
+
+    await this.prisma.notification.create({
+      data: {
+        userId: creatorId,
+        title: `Survey "${updatedSurvey.title}" has been published`,
+        message:
+          'Your survey is now active and available to matched participants.',
+        type: 'SURVEY',
+      },
+    });
+
+    return {
+      message: 'Survey published successfully',
+      survey: updatedSurvey,
+      readiness,
+      nextStep: 'PUBLISHED',
+    };
+  }
+
   private async validateEditableSurveyForCreator(params: {
     creatorId: string;
     surveyId: string;
@@ -796,6 +1022,30 @@ export class SurveyService {
     }
 
     return survey;
+  }
+
+  private getSurveyReadinessChecklist(survey: {
+    title?: string | null;
+    description?: string | null;
+    creationMethod?: SurveyCreationMethod | null;
+    questions?: unknown[];
+    targetAudience?: object | null;
+    sampleBudget?: {
+      rewardPerParticipant?: object | string | number | null;
+    } | null;
+  }) {
+    return {
+      basicDetailsCompleted: Boolean(survey.title && survey.description),
+      surveyMethodSelected: Boolean(survey.creationMethod),
+      questionsAddedSuccessfully: Boolean(
+        survey.questions && survey.questions.length > 0,
+      ),
+      targetAudienceDefined: Boolean(survey.targetAudience),
+      budgetConfigured: Boolean(survey.sampleBudget),
+      rewardPerParticipantCalculated: Boolean(
+        survey.sampleBudget?.rewardPerParticipant,
+      ),
+    };
   }
 
   private validateQuestionOptions(
