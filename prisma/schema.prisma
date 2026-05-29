@@ -112,6 +112,30 @@ enum SurveyPublishOption {
   SAVE_DRAFT
 }
 
+enum SurveyResponseStatus {
+  STARTED
+  COMPLETED
+  REJECTED
+}
+
+enum RewardStatus {
+  PENDING
+  RELEASED
+  WITHDRAWN
+}
+
+enum WalletTransactionType {
+  SURVEY_REWARD
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -135,6 +159,16 @@ model User {
   surveyResponses SurveyResponse[]
 
   notifications Notification[]
+
+  participantAge            Int?
+  participantGender         AudienceGender?
+  participantCity           String?
+  participantDistrict       String?
+  participantEducationLevel String?
+  participantOccupation     String?
+
+  wallet             ParticipantWallet?
+  walletTransactions WalletTransaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,21 +231,6 @@ model Survey {
   @@index([creatorId])
   @@index([status])
   @@index([category])
-}
-
-model SurveyResponse {
-  id String @id @default(uuid())
-
-  surveyId String
-  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-
-  participantId String?
-  participant   User?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
-
-  createdAt DateTime @default(now())
-
-  @@index([surveyId])
-  @@index([participantId])
 }
 
 model Notification {
@@ -319,4 +338,71 @@ model SurveySampleBudget {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model SurveyResponse {
+  id String @id @default(uuid())
+
+  surveyId String
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  participantId String?
+  participant   User?   @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  status SurveyResponseStatus @default(STARTED)
+
+  rewardAmount Decimal?     @db.Decimal(12, 2)
+  rewardStatus RewardStatus @default(PENDING)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([surveyId, participantId])
+  @@index([surveyId])
+  @@index([participantId])
+  @@index([status])
+}
+
+model ParticipantWallet {
+  id String @id @default(uuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  balance        Decimal @default(0) @db.Decimal(12, 2)
+  pendingRewards Decimal @default(0) @db.Decimal(12, 2)
+  totalEarned    Decimal @default(0) @db.Decimal(12, 2)
+  totalWithdrawn Decimal @default(0) @db.Decimal(12, 2)
+
+  currency SurveyBudgetCurrency @default(LKR)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WalletTransaction {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  surveyResponseId String?
+
+  type   WalletTransactionType
+  status WalletTransactionStatus @default(PENDING)
+
+  amount   Decimal              @db.Decimal(12, 2)
+  currency SurveyBudgetCurrency @default(LKR)
+
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
 }
