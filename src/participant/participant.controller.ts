@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 
 import { ParticipantService } from './participant.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
+import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 
 @Controller('participant')
 export class ParticipantController {
@@ -15,5 +16,10 @@ export class ParticipantController {
   @Get('available-surveys')
   getAvailableSurveys(@Query() query: AvailableSurveysQueryDto) {
     return this.participantService.getAvailableSurveys(query);
+  }
+
+  @Get('wallet')
+  getWallet(@Query() query: ParticipantWalletQueryDto) {
+    return this.participantService.getWallet(query);
   }
 }

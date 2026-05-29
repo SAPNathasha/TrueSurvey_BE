@@ -6,6 +6,7 @@ import {
 
 import { PrismaService } from '../auth/prisma/prisma.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
+import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 
 import {
   AudienceGender,
@@ -16,6 +17,8 @@ import {
   SurveyResponseStatus,
   SurveyStatus,
   UserRole,
+  WalletTransactionStatus,
+  WalletTransactionType,
 } from '../generated/prisma/enums';
 
 type DecimalLike = {
@@ -96,6 +99,19 @@ type LockedSurveyCard = Omit<AvailableSurveyCard, 'isLocked'> & {
 };
 
 type SurveyDisplayCard = AvailableSurveyCard | LockedSurveyCard;
+
+type WalletTableRow = {
+  id: string;
+  rowType: 'SURVEY_REWARD' | 'WITHDRAWAL';
+  surveyId: string | null;
+  surveyName: string;
+  category: SurveyCategory | null;
+  status: string;
+  earnedMoney: number;
+  date: Date | null;
+  paymentMethod: string;
+  action: string;
+};
 
 @Injectable()
 export class ParticipantService {
@@ -272,8 +288,7 @@ export class ParticipantService {
     ]);
 
     const totalEarned = completedResponses.reduce((sum, response) => {
-      const rewardAmount = this.toNumber(response.rewardAmount);
-      return sum + rewardAmount;
+      return sum + this.toNumber(response.rewardAmount);
     }, 0);
 
     const pendingRewards = completedResponses.reduce((sum, response) => {
@@ -281,8 +296,7 @@ export class ParticipantService {
         return sum;
       }
 
-      const rewardAmount = this.toNumber(response.rewardAmount);
-      return sum + rewardAmount;
+      return sum + this.toNumber(response.rewardAmount);
     }, 0);
 
     const availableAndLocked = this.buildDashboardSurveyLists({
@@ -608,6 +622,247 @@ export class ParticipantService {
     };
   }
 
+  async getWallet(query: ParticipantWalletQueryDto) {
+    const participantId = query.participantId;
+
+    if (!participantId) {
+      throw new BadRequestException('participantId is required');
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 8;
+    const skip = (page - 1) * limit;
+
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: participantId,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException('Only participants can access wallet');
+    }
+
+    const wallet = await this.getOrCreateWallet(participantId);
+
+    const [completedResponses, withdrawalTransactions, allTransactions] =
+      await Promise.all([
+        this.prisma.surveyResponse.findMany({
+          where: {
+            participantId,
+            status: SurveyResponseStatus.COMPLETED,
+          },
+          orderBy: {
+            completedAt: 'desc',
+          },
+          select: {
+            id: true,
+            rewardAmount: true,
+            rewardStatus: true,
+            completedAt: true,
+            survey: {
+              select: {
+                id: true,
+                title: true,
+                category: true,
+              },
+            },
+          },
+        }),
+
+        this.prisma.walletTransaction.findMany({
+          where: {
+            userId: participantId,
+            type: WalletTransactionType.WITHDRAWAL,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 5,
+          select: {
+            id: true,
+            amount: true,
+            currency: true,
+            status: true,
+            description: true,
+            createdAt: true,
+          },
+        }),
+
+        this.prisma.walletTransaction.findMany({
+          where: {
+            userId: participantId,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            amount: true,
+            currency: true,
+            description: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+    const rewardRows: WalletTableRow[] = completedResponses.map((response) => {
+      const status =
+        response.rewardStatus === RewardStatus.RELEASED
+          ? 'COMPLETED'
+          : response.rewardStatus === RewardStatus.WITHDRAWN
+            ? 'PAID'
+            : 'PENDING';
+
+      return {
+        id: response.id,
+        rowType: 'SURVEY_REWARD',
+        surveyId: response.survey.id,
+        surveyName: response.survey.title,
+        category: response.survey.category,
+        status,
+        earnedMoney: this.toNumber(response.rewardAmount),
+        date: response.completedAt,
+        paymentMethod: 'Wallet Balance',
+        action: 'View details',
+      };
+    });
+
+    const withdrawalRows: WalletTableRow[] = allTransactions
+      .filter(
+        (transaction) => transaction.type === WalletTransactionType.WITHDRAWAL,
+      )
+      .map((transaction) => ({
+        id: transaction.id,
+        rowType: 'WITHDRAWAL',
+        surveyId: null,
+        surveyName: transaction.description ?? 'Withdrawal',
+        category: null,
+        status:
+          transaction.status === WalletTransactionStatus.COMPLETED
+            ? 'PAID'
+            : transaction.status === WalletTransactionStatus.PENDING
+              ? 'PROCESSING'
+              : 'FAILED',
+        earnedMoney: this.toNumber(transaction.amount),
+        date: transaction.createdAt,
+        paymentMethod: 'Bank Transfer',
+        action: 'View details',
+      }));
+
+    let tableRows: WalletTableRow[] = [...rewardRows, ...withdrawalRows];
+
+    if (query.search) {
+      const search = query.search.toLowerCase();
+
+      tableRows = tableRows.filter((row) =>
+        row.surveyName.toLowerCase().includes(search),
+      );
+    }
+
+    if (query.status && query.status !== 'ALL') {
+      if (query.status === 'WITHDRAWALS') {
+        tableRows = tableRows.filter((row) => row.rowType === 'WITHDRAWAL');
+      } else {
+        tableRows = tableRows.filter((row) => row.status === query.status);
+      }
+    }
+
+    tableRows = this.sortWalletRows(tableRows, query.sortBy ?? 'MOST_RECENT');
+
+    const total = tableRows.length;
+    const paginatedTransactions = tableRows.slice(skip, skip + limit);
+
+    const earningsTrend = this.buildEarningsTrend(completedResponses);
+
+    const earningsBreakdown = this.buildEarningsBreakdown({
+      completedResponses,
+      withdrawalTransactions,
+    });
+
+    const recentWithdrawals = withdrawalTransactions.map((withdrawal) => ({
+      id: withdrawal.id,
+      amount: this.toNumber(withdrawal.amount),
+      currency: withdrawal.currency,
+      status: withdrawal.status,
+      method: withdrawal.description ?? 'Bank Transfer',
+      createdAt: withdrawal.createdAt,
+    }));
+
+    return {
+      participant: {
+        id: participant.id,
+        username: participant.username,
+      },
+
+      summaryCards: {
+        currentWalletBalance: this.toNumber(wallet.balance),
+        pendingEarnings: this.toNumber(wallet.pendingRewards),
+        totalEarned: this.toNumber(wallet.totalEarned),
+        totalWithdrawn: this.toNumber(wallet.totalWithdrawn),
+        currency: wallet.currency,
+      },
+
+      walletBalance: {
+        amount: this.toNumber(wallet.balance),
+        growthPercentage: 12.5,
+        currency: wallet.currency,
+      },
+
+      earningsTrend,
+
+      filters: {
+        search: query.search ?? null,
+        status: query.status ?? 'ALL',
+        sortBy: query.sortBy ?? 'MOST_RECENT',
+      },
+
+      transactions: {
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          showingFrom: total === 0 ? 0 : skip + 1,
+          showingTo: Math.min(skip + limit, total),
+        },
+        rows: paginatedTransactions,
+      },
+
+      recentWithdrawals,
+
+      earningsBreakdown,
+
+      withdrawalMethod: {
+        type: 'BANK_ACCOUNT',
+        name: 'Bank Account',
+        description: 'Commercial Bank •••• 1234',
+        isDefault: true,
+      },
+
+      walletTips: [
+        'Complete more surveys to increase your earnings.',
+        'Verify your account to access high paying surveys.',
+        'Keep your profile updated for better matches.',
+        'Withdrawals are processed within 1–3 business days.',
+      ],
+    };
+  }
+
   private buildDashboardSurveyLists(params: {
     participant: ParticipantProfileForDashboard;
     isVerified: boolean;
@@ -885,6 +1140,37 @@ export class ParticipantService {
     });
   }
 
+  private sortWalletRows(
+    rows: WalletTableRow[],
+    sortBy: 'MOST_RECENT' | 'OLDEST' | 'AMOUNT_HIGH' | 'AMOUNT_LOW',
+  ): WalletTableRow[] {
+    const sorted = [...rows];
+
+    if (sortBy === 'OLDEST') {
+      return sorted.sort((a, b) => {
+        const aTime = a.date?.getTime() ?? 0;
+        const bTime = b.date?.getTime() ?? 0;
+
+        return aTime - bTime;
+      });
+    }
+
+    if (sortBy === 'AMOUNT_HIGH') {
+      return sorted.sort((a, b) => b.earnedMoney - a.earnedMoney);
+    }
+
+    if (sortBy === 'AMOUNT_LOW') {
+      return sorted.sort((a, b) => a.earnedMoney - b.earnedMoney);
+    }
+
+    return sorted.sort((a, b) => {
+      const aTime = a.date?.getTime() ?? 0;
+      const bTime = b.date?.getTime() ?? 0;
+
+      return bTime - aTime;
+    });
+  }
+
   private async getWeeklyCompletedResponses(participantId: string) {
     const today = new Date();
 
@@ -943,12 +1229,109 @@ export class ParticipantService {
       const item = result.find((entry) => entry.date === key);
 
       if (item) {
-        const rewardAmount = this.toNumber(response.rewardAmount);
-        item.earned += rewardAmount;
+        item.earned += this.toNumber(response.rewardAmount);
       }
     }
 
     return result;
+  }
+
+  private buildEarningsTrend(
+    completedResponses: {
+      completedAt: Date | null;
+      rewardAmount: unknown;
+    }[],
+  ) {
+    const today = new Date();
+
+    const result: {
+      date: string;
+      earned: number;
+    }[] = [];
+
+    for (let i = 29; i >= 0; i -= 1) {
+      const date = new Date();
+      date.setDate(today.getDate() - i);
+
+      const key = date.toISOString().split('T')[0] ?? '';
+
+      result.push({
+        date: key,
+        earned: 0,
+      });
+    }
+
+    for (const response of completedResponses) {
+      if (!response.completedAt) {
+        continue;
+      }
+
+      const key = response.completedAt.toISOString().split('T')[0] ?? '';
+      const item = result.find((entry) => entry.date === key);
+
+      if (item) {
+        item.earned += this.toNumber(response.rewardAmount);
+      }
+    }
+
+    return result;
+  }
+
+  private buildEarningsBreakdown(params: {
+    completedResponses: {
+      rewardAmount: unknown;
+      rewardStatus: RewardStatus;
+    }[];
+    withdrawalTransactions: {
+      amount: unknown;
+      status: WalletTransactionStatus;
+    }[];
+  }) {
+    const completed = params.completedResponses.reduce((sum, response) => {
+      if (response.rewardStatus !== RewardStatus.RELEASED) {
+        return sum;
+      }
+
+      return sum + this.toNumber(response.rewardAmount);
+    }, 0);
+
+    const pending = params.completedResponses.reduce((sum, response) => {
+      if (response.rewardStatus !== RewardStatus.PENDING) {
+        return sum;
+      }
+
+      return sum + this.toNumber(response.rewardAmount);
+    }, 0);
+
+    const withdrawn = params.withdrawalTransactions.reduce(
+      (sum, transaction) => {
+        if (transaction.status !== WalletTransactionStatus.COMPLETED) {
+          return sum;
+        }
+
+        return sum + this.toNumber(transaction.amount);
+      },
+      0,
+    );
+
+    const processing = params.withdrawalTransactions.reduce(
+      (sum, transaction) => {
+        if (transaction.status !== WalletTransactionStatus.PENDING) {
+          return sum;
+        }
+
+        return sum + this.toNumber(transaction.amount);
+      },
+      0,
+    );
+
+    return {
+      completed,
+      pending,
+      processing,
+      withdrawn,
+      totalEarned: completed + pending,
+    };
   }
 
   private getVerificationProgress(params: {
