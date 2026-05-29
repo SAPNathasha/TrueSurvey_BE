@@ -186,6 +186,21 @@ model SurveyResponse {
   @@index([participantId])
 }
 
+model Notification {
+  id      String           @id @default(uuid())
+  title   String
+  message String?
+  type    NotificationType @default(SYSTEM)
+  isRead  Boolean          @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
 model SurveyQuestion {
   id String @id @default(uuid())
 
@@ -194,7 +209,7 @@ model SurveyQuestion {
 
   questionText String
   type         SurveyQuestionType
-  source       SurveyQuestionSource @default(AI_GENERATED)
+  source       SurveyQuestionSource @default(MANUAL)
 
   order Int
 
@@ -221,19 +236,4 @@ model SurveyQuestionOption {
   createdAt DateTime @default(now())
 
   @@index([questionId])
-}
-
-model Notification {
-  id      String           @id @default(uuid())
-  title   String
-  message String?
-  type    NotificationType @default(SYSTEM)
-  isRead  Boolean          @default(false)
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@index([userId])
 }

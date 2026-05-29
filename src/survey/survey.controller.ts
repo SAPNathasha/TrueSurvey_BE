@@ -1,9 +1,20 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 
 import { SurveyService } from './survey.service';
 import { CreateSurveyBasicDetailsRequestDto } from './dto/create-survey-basic-details-request.dto';
 import { SelectSurveyMethodDto } from './dto/select-survey-method.dto';
-import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
+import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
+import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
+import { CreatorIdDto } from './dto/creator-id.dto';
 
 @Controller('surveys')
 export class SurveyController {
@@ -26,15 +37,58 @@ export class SurveyController {
     );
   }
 
-  @Post(':surveyId/ai-generate-questions')
-  generateAiQuestions(
+  @Post(':surveyId/questions/manual')
+  createManualQuestion(
     @Param('surveyId') surveyId: string,
-    @Body() body: GenerateAiQuestionsDto,
+    @Body() body: CreateManualQuestionDto,
   ) {
-    return this.surveyService.generateAiQuestions(
+    return this.surveyService.createManualQuestion(
       body.creatorId,
       surveyId,
       body,
+    );
+  }
+
+  @Get(':surveyId/questions')
+  getSurveyQuestions(
+    @Param('surveyId') surveyId: string,
+    @Query('creatorId') creatorId: string,
+  ) {
+    return this.surveyService.getSurveyQuestions(creatorId, surveyId);
+  }
+
+  @Patch(':surveyId/questions/complete')
+  completeQuestionStep(
+    @Param('surveyId') surveyId: string,
+    @Body() body: CreatorIdDto,
+  ) {
+    return this.surveyService.completeQuestionStep(body.creatorId, surveyId);
+  }
+
+  @Patch(':surveyId/questions/:questionId')
+  updateManualQuestion(
+    @Param('surveyId') surveyId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: UpdateManualQuestionDto,
+  ) {
+    return this.surveyService.updateManualQuestion(
+      body.creatorId,
+      surveyId,
+      questionId,
+      body,
+    );
+  }
+
+  @Delete(':surveyId/questions/:questionId')
+  deleteQuestion(
+    @Param('surveyId') surveyId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: CreatorIdDto,
+  ) {
+    return this.surveyService.deleteQuestion(
+      body.creatorId,
+      surveyId,
+      questionId,
     );
   }
 }
