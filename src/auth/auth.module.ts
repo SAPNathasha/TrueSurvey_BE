@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, JwtService } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 
 import { AuthController } from './auth.controller';
@@ -16,7 +16,13 @@ import { MailService } from './mail/mail.service';
     JwtModule.register({}),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PrismaService, StorageService, MailService],
+  providers: [
+    AuthService,
+    PrismaService,
+    StorageService,
+    MailService,
+    JwtService,
+  ],
   exports: [AuthService],
 })
 export class AuthModule {}

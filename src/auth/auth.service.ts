@@ -48,11 +48,6 @@ type LoginResponse = {
 
 type RefreshTokenResponse = {
   accessToken: string;
-  refreshToken: string;
-};
-
-type ForgotPasswordResponse = {
-  message: string;
 };
 
 type ResetPasswordResponse = {
@@ -257,19 +252,9 @@ export class AuthService {
     };
 
     const newAccessToken = await this.generateAccessToken(payload);
-    const newRefreshToken = await this.generateRefreshToken(payload);
-
-    await this.prisma.refreshToken.delete({
-      where: {
-        id: validRefreshToken.id,
-      },
-    });
-
-    await this.saveRefreshToken(user.id, newRefreshToken);
 
     return {
       accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
     };
   }
 
@@ -285,64 +270,70 @@ export class AuthService {
     };
   }
 
-  async forgotPassword(email: string): Promise<ForgotPasswordResponse> {
-    const successMessage =
-      'If an account with that email exists, a password reset link has been sent.';
+  async forgotPassword(email: string) {
+    try {
+      const successMessage =
+        'If an account with that email exists, a password reset link has been sent.';
 
-    const user = await this.prisma.user.findUnique({
-      where: {
-        email,
-      },
-    });
+      const user = await this.prisma.user.findUnique({
+        where: {
+          email,
+        },
+      });
 
-    /**
-     * Important security behavior:
-     * Always return the same response, even if the email does not exist.
-     * This prevents attackers from checking which emails are registered.
-     */
-    if (!user) {
+      /**
+       * Important security behavior:
+       * Always return the same response, even if the email does not exist.
+       * This prevents attackers from checking which emails are registered.
+       */
+      if (!user) {
+        return {
+          message: successMessage,
+          resetLink: 'test',
+        };
+      }
+
+      const rawToken = this.generatePasswordResetToken();
+      const tokenHash = this.hashPasswordResetToken(rawToken);
+
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+      /**
+       * Optional cleanup:
+       * Delete old unused reset tokens for this user before creating a new one.
+       */
+      await this.prisma.passwordResetToken.deleteMany({
+        where: {
+          userId: user.id,
+          usedAt: null,
+        },
+      });
+
+      await this.prisma.passwordResetToken.create({
+        data: {
+          tokenHash,
+          userId: user.id,
+          expiresAt,
+        },
+      });
+
+      const frontendUrl = process.env.FRONTEND_URL;
+
+      if (!frontendUrl) {
+        throw new BadRequestException('FRONTEND_URL is missing in .env file');
+      }
+
+      const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+      await this.mailService.sendPasswordResetEmail(user.email, resetLink);
+
       return {
         message: successMessage,
+        resetLink,
       };
+    } catch (err) {
+      console.log(err);
     }
-
-    const rawToken = this.generatePasswordResetToken();
-    const tokenHash = this.hashPasswordResetToken(rawToken);
-
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-    /**
-     * Optional cleanup:
-     * Delete old unused reset tokens for this user before creating a new one.
-     */
-    await this.prisma.passwordResetToken.deleteMany({
-      where: {
-        userId: user.id,
-        usedAt: null,
-      },
-    });
-
-    await this.prisma.passwordResetToken.create({
-      data: {
-        tokenHash,
-        userId: user.id,
-        expiresAt,
-      },
-    });
-
-    const frontendUrl = process.env.FRONTEND_URL;
-
-    if (!frontendUrl) {
-      throw new BadRequestException('FRONTEND_URL is missing in .env file');
-    }
-
-    const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
-
-    await this.mailService.sendPasswordResetEmail(user.email, resetLink);
-
-    return {
-      message: successMessage,
-    };
   }
 
   async resetPassword(

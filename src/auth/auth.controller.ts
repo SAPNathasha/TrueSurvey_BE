@@ -3,22 +3,31 @@ import {
   Body,
   Controller,
   Post,
+  Req,
+  Res,
+  UnauthorizedException,
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import type { Express } from 'express';
+import type { Response } from 'express';
+import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { TokenPayload } from './types/token-payload.type';
+import { JwtService } from '@nestjs/jwt';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   @Post('register')
   @UseInterceptors(
@@ -68,17 +77,68 @@ export class AuthController {
   }
 
   @Post('login')
-  login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.login(loginDto);
+
+    // Refresh token is saved as an HTTP-only cookie
+    response.cookie('refreshToken', result.refreshToken, {
+      httpOnly: true,
+      secure: false, // true in production with HTTPS
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 5 minutes
+    });
+
+    // Access token is returned to frontend
+    // Frontend should send it later as Bearer token
+    return {
+      message: result.message,
+      accessToken: result.accessToken,
+      user: result.user,
+    };
   }
 
   @Post('refresh')
-  refresh(@Body() body: { userId: string; refreshToken: string }) {
-    return this.authService.refreshTokens(body.userId, body.refreshToken);
+  async refresh(@Req() request: Request) {
+    const refreshToken = request.cookies.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token not found');
+    }
+
+    let payload: TokenPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<TokenPayload>(refreshToken, {
+        secret: process.env.JWT_REFRESH_SECRET,
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const result = await this.authService.refreshTokens(
+      payload.sub,
+      refreshToken,
+    );
+
+    return {
+      message: 'Token refreshed successfully',
+      accessToken: result.accessToken,
+    };
   }
 
   @Post('logout')
-  logout(@Body() body: { userId: string }) {
+  logout(
+    @Body() body: { userId: string },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+    });
     return this.authService.logout(body.userId);
   }
 
