@@ -57,6 +57,11 @@ enum SurveyCreationStep {
   COMPLETED
 }
 
+enum SurveyCreationMethod {
+  AI_ASSISTED
+  MANUAL
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -121,6 +126,8 @@ model Survey {
   estimatedCompletionDays Int
 
   currentStep SurveyCreationStep @default(BASIC_DETAILS)
+
+  creationMethod SurveyCreationMethod?
 
   creatorId String
   creator   User   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
