@@ -53,7 +53,8 @@ export class MailService {
           </div>
         `,
       });
-    } catch {
+    } catch (err) {
+      console.log(err);
       throw new InternalServerErrorException('Failed to send reset email');
     }
   }
