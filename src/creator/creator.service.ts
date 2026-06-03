@@ -2,6 +2,9 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../auth/prisma/prisma.service';
 import { CreatorDashboardResponse } from './types/dashboard.types';
+import { CreatorSurveysResponse } from './types/survey-list.types';
+import { Prisma } from '../generated/prisma/client';
+import { SurveyStatus } from '../generated/prisma/enums';
 
 @Injectable()
 export class CreatorService {
@@ -171,6 +174,67 @@ export class CreatorService {
         status: survey.status,
         category: survey.category,
         responseCount: survey.responses.length,
+        updatedAt: survey.updatedAt,
+      })),
+    };
+  }
+
+  async getSurveys(
+    creatorId: string,
+    status?: SurveyStatus,
+    limit = 10,
+  ): Promise<CreatorSurveysResponse> {
+    if (!creatorId) {
+      throw new BadRequestException('creatorId is required');
+    }
+
+    const creator = await this.prisma.user.findUnique({
+      where: { id: creatorId },
+      select: { id: true, role: true },
+    });
+
+    if (!creator) {
+      throw new BadRequestException('Creator not found');
+    }
+
+    if (creator.role !== 'CREATOR' && creator.role !== 'BOTH') {
+      throw new BadRequestException('Only creators can access this resource');
+    }
+
+    const where: Prisma.SurveyWhereInput = { creatorId };
+
+    if (status) {
+      where.status = status;
+    }
+
+    const surveys = await this.prisma.survey.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        category: true,
+        createdAt: true,
+        updatedAt: true,
+        responses: {
+          select: { id: true },
+        },
+      },
+    });
+
+    return {
+      total: surveys.length,
+      surveys: surveys.map((survey) => ({
+        id: survey.id,
+        title: survey.title,
+        description: survey.description,
+        status: survey.status,
+        category: survey.category,
+        responseCount: survey.responses.length,
+        createdAt: survey.createdAt,
         updatedAt: survey.updatedAt,
       })),
     };

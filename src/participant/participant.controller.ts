@@ -36,12 +36,12 @@ export class ParticipantController {
     return this.participantService.getWallet(query);
   }
 
-  @Get('settings/profile')
+  @Get('profile-settings')
   getProfileSettings(@Query('participantId') participantId: string) {
     return this.participantService.getProfileSettings(participantId);
   }
 
-  @Patch('settings/profile')
+  @Patch('profile-settings')
   updateProfileSettings(@Body() body: UpdateParticipantProfileDto) {
     return this.participantService.updateProfileSettings(body);
   }
