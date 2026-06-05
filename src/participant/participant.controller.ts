@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Patch,
   Query,
   UploadedFile,
@@ -13,6 +14,7 @@ import { memoryStorage } from 'multer';
 import type { Express } from 'express';
 
 import { ParticipantService } from './participant.service';
+import { AvailableSurveyDetailQueryDto } from './dto/available-survey-detail-query.dto';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
@@ -29,6 +31,17 @@ export class ParticipantController {
   @Get('available-surveys')
   getAvailableSurveys(@Query() query: AvailableSurveysQueryDto) {
     return this.participantService.getAvailableSurveys(query);
+  }
+
+  @Get('available-surveys/:surveyId')
+  getAvailableSurveyById(
+    @Param('surveyId') surveyId: string,
+    @Query() query: AvailableSurveyDetailQueryDto,
+  ) {
+    return this.participantService.getAvailableSurveyById(
+      query.participantId,
+      surveyId,
+    );
   }
 
   @Get('wallet')

@@ -116,6 +116,20 @@ type WalletTableRow = {
   action: string;
 };
 
+type ParticipantSurveyAccessContext = {
+  id: string;
+  username: string;
+  role: UserRole;
+  nicImagePath: string | null;
+  selfiePath: string | null;
+  participantAge: number | null;
+  participantGender: AudienceGender | null;
+  participantCity: string | null;
+  participantDistrict: string | null;
+  participantEducationLevel: string | null;
+  participantOccupation: string | null;
+};
+
 @Injectable()
 export class ParticipantService {
   constructor(
@@ -615,41 +629,10 @@ export class ParticipantService {
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const participant = await this.prisma.user.findUnique({
-      where: {
-        id: participantId,
-      },
-      select: {
-        id: true,
-        username: true,
-        role: true,
-        nicImagePath: true,
-        selfiePath: true,
-        participantAge: true,
-        participantGender: true,
-        participantCity: true,
-        participantDistrict: true,
-        participantEducationLevel: true,
-        participantOccupation: true,
-      },
-    });
+    const participant =
+      await this.getParticipantSurveyAccessContext(participantId);
 
-    if (!participant) {
-      throw new BadRequestException('Participant not found');
-    }
-
-    if (
-      participant.role !== UserRole.PARTICIPANT &&
-      participant.role !== UserRole.BOTH
-    ) {
-      throw new ForbiddenException(
-        'Only participants can view available surveys',
-      );
-    }
-
-    const isVerified = Boolean(
-      participant.nicImagePath && participant.selfiePath,
-    );
+    const isVerified = this.isParticipantVerified(participant);
 
     const activeSurveys = await this.prisma.survey.findMany({
       where: {
@@ -859,6 +842,205 @@ export class ParticipantService {
       },
 
       surveys: paginatedSurveys,
+    };
+  }
+
+  async getAvailableSurveyById(participantId: string, surveyId: string) {
+    if (!participantId) {
+      throw new BadRequestException('participantId is required');
+    }
+
+    if (!surveyId) {
+      throw new BadRequestException('surveyId is required');
+    }
+
+    const participant =
+      await this.getParticipantSurveyAccessContext(participantId);
+
+    const isVerified = this.isParticipantVerified(participant);
+
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        category: true,
+        audience: true,
+        status: true,
+        estimatedCompletionDays: true,
+        publishedAt: true,
+        questions: {
+          orderBy: {
+            order: 'asc',
+          },
+          select: {
+            id: true,
+            questionText: true,
+            type: true,
+            source: true,
+            order: true,
+            isRequired: true,
+            options: {
+              orderBy: {
+                order: 'asc',
+              },
+              select: {
+                id: true,
+                optionText: true,
+                order: true,
+              },
+            },
+          },
+        },
+        targetAudience: {
+          select: {
+            minimumAge: true,
+            maximumAge: true,
+            gender: true,
+            city: true,
+            district: true,
+            educationLevel: true,
+            occupation: true,
+            sampleBase: true,
+            estimatedReach: true,
+          },
+        },
+        sampleBudget: {
+          select: {
+            requiredResponses: true,
+            rewardPerParticipant: true,
+            currency: true,
+            totalBudget: true,
+            participantRewardBudget: true,
+            rewardDistribution: true,
+          },
+        },
+        responses: {
+          select: {
+            participantId: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!survey || survey.status !== SurveyStatus.ACTIVE) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    const alreadyStartedOrCompleted = survey.responses.some(
+      (response) => response.participantId === participantId,
+    );
+
+    if (alreadyStartedOrCompleted) {
+      throw new ForbiddenException(
+        'You have already started or completed this survey',
+      );
+    }
+
+    const completedResponses = survey.responses.filter(
+      (response) => response.status === SurveyResponseStatus.COMPLETED,
+    ).length;
+
+    const requiredResponses = survey.sampleBudget?.requiredResponses ?? 0;
+
+    if (requiredResponses > 0 && completedResponses >= requiredResponses) {
+      throw new ForbiddenException(
+        'This survey is no longer accepting responses',
+      );
+    }
+
+    const requiresVerified =
+      survey.audience === SurveyAudienceType.VERIFIED_USERS_ONLY ||
+      survey.targetAudience?.sampleBase ===
+        SurveyAudienceType.VERIFIED_USERS_ONLY;
+
+    const matchesProfile = this.matchesTargetAudience(
+      {
+        participantAge: participant.participantAge,
+        participantGender: participant.participantGender,
+        participantCity: participant.participantCity,
+        participantDistrict: participant.participantDistrict,
+        participantEducationLevel: participant.participantEducationLevel,
+        participantOccupation: participant.participantOccupation,
+      },
+      survey.targetAudience,
+    );
+
+    if (!matchesProfile) {
+      throw new ForbiddenException(
+        'You do not match the target audience for this survey',
+      );
+    }
+
+    if (requiresVerified && !isVerified) {
+      throw new ForbiddenException(
+        'Verify your identity to access this survey',
+      );
+    }
+
+    const rewardAmount = this.toNumber(
+      survey.sampleBudget?.rewardPerParticipant,
+    );
+    const completionPercentage =
+      requiredResponses > 0
+        ? Math.round((completedResponses / requiredResponses) * 100)
+        : 0;
+
+    return {
+      participant: {
+        id: participant.id,
+        username: participant.username,
+        isVerified,
+      },
+      survey: {
+        id: survey.id,
+        title: survey.title,
+        description: survey.description,
+        category: survey.category,
+        audience: survey.audience,
+        estimatedTime: `${survey.estimatedCompletionDays} min`,
+        estimatedCompletionDays: survey.estimatedCompletionDays,
+        questionCount: survey.questions.length,
+        rewardAmount,
+        currency: survey.sampleBudget?.currency ?? SurveyBudgetCurrency.LKR,
+        completedResponses,
+        requiredResponses,
+        completionPercentage,
+        publishedAt: survey.publishedAt,
+        isVerifiedOnly: requiresVerified,
+        targetAudience: survey.targetAudience,
+        sampleBudget: survey.sampleBudget
+          ? {
+              requiredResponses: survey.sampleBudget.requiredResponses,
+              rewardPerParticipant: rewardAmount,
+              currency: survey.sampleBudget.currency,
+              totalBudget: this.toNumber(survey.sampleBudget.totalBudget),
+              participantRewardBudget: this.toNumber(
+                survey.sampleBudget.participantRewardBudget,
+              ),
+              rewardDistribution: survey.sampleBudget.rewardDistribution,
+            }
+          : null,
+        questions: survey.questions.map((question) => ({
+          id: question.id,
+          questionText: question.questionText,
+          type: question.type,
+          source: question.source,
+          order: question.order,
+          isRequired: question.isRequired,
+          options: question.options,
+        })),
+      },
+      submission: {
+        participantId: participant.id,
+        surveyId: survey.id,
+        questionCount: survey.questions.length,
+        canSubmit: true,
+      },
     };
   }
 
@@ -1197,6 +1379,53 @@ export class ParticipantService {
       availableSurveys,
       lockedSurveys,
     };
+  }
+
+  private async getParticipantSurveyAccessContext(
+    participantId: string,
+  ): Promise<ParticipantSurveyAccessContext> {
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: participantId,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        nicImagePath: true,
+        selfiePath: true,
+        participantAge: true,
+        participantGender: true,
+        participantCity: true,
+        participantDistrict: true,
+        participantEducationLevel: true,
+        participantOccupation: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can view available surveys',
+      );
+    }
+
+    return participant;
+  }
+
+  private isParticipantVerified(
+    participant: Pick<
+      ParticipantSurveyAccessContext,
+      'nicImagePath' | 'selfiePath'
+    >,
+  ) {
+    return Boolean(participant.nicImagePath && participant.selfiePath);
   }
 
   private matchesTargetAudience(
