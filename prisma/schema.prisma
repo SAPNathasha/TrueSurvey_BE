@@ -270,6 +270,7 @@ model SurveyQuestion {
   isRequired Boolean @default(true)
 
   options SurveyQuestionOption[]
+  responseAnswers SurveyResponseAnswer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -361,6 +362,8 @@ model SurveyResponse {
   rewardAmount Decimal?     @db.Decimal(12, 2)
   rewardStatus RewardStatus @default(PENDING)
 
+  answers SurveyResponseAnswer[]
+
   startedAt   DateTime  @default(now())
   completedAt DateTime?
 
@@ -371,6 +374,33 @@ model SurveyResponse {
   @@index([surveyId])
   @@index([participantId])
   @@index([status])
+}
+
+model SurveyResponseAnswer {
+  id String @id @default(uuid())
+
+  surveyResponseId String
+  surveyResponse   SurveyResponse @relation(fields: [surveyResponseId], references: [id], onDelete: Cascade)
+
+  questionId String
+  question   SurveyQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  questionType SurveyQuestionType
+
+  answerText        String?
+  selectedOptionId  String?
+  selectedOptionIds String[] @default([])
+  ratingValue       Int?
+  booleanValue      Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([surveyResponseId, questionId])
+  @@index([surveyResponseId])
+  @@index([questionId])
+  @@index([questionType])
+  @@index([selectedOptionId])
 }
 
 model ParticipantWallet {

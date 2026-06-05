@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../auth/prisma/prisma.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
+import { SubmitSurveyDto } from './dto/submit-survey.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
 import { StorageService } from '../auth/storage/storage.service';
 import type { Express } from 'express';
@@ -17,6 +18,7 @@ import {
   SurveyAudienceType,
   SurveyBudgetCurrency,
   SurveyCategory,
+  SurveyQuestionType,
   SurveyResponseStatus,
   SurveyStatus,
   UserRole,
@@ -128,6 +130,53 @@ type ParticipantSurveyAccessContext = {
   participantDistrict: string | null;
   participantEducationLevel: string | null;
   participantOccupation: string | null;
+};
+
+type ParticipantAccessibleSurvey = {
+  id: string;
+  title: string;
+  description: string;
+  category: SurveyCategory;
+  audience: SurveyAudienceType;
+  status: SurveyStatus;
+  estimatedCompletionDays: number;
+  publishedAt: Date | null;
+  questions: {
+    id: string;
+    questionText: string;
+    type: SurveyQuestionType;
+    source: string;
+    order: number;
+    isRequired: boolean;
+    options: {
+      id: string;
+      optionText: string;
+      order: number;
+    }[];
+  }[];
+  targetAudience: {
+    minimumAge: number | null;
+    maximumAge: number | null;
+    gender: AudienceGender;
+    city: string | null;
+    district: string | null;
+    educationLevel: string | null;
+    occupation: string | null;
+    sampleBase: SurveyAudienceType;
+    estimatedReach: number | null;
+  } | null;
+  sampleBudget: {
+    requiredResponses: number;
+    rewardPerParticipant: unknown;
+    currency: SurveyBudgetCurrency;
+    totalBudget: unknown;
+    participantRewardBudget: unknown;
+    rewardDistribution: string;
+  } | null;
+  responses: {
+    participantId: string | null;
+    status: SurveyResponseStatus;
+  }[];
 };
 
 @Injectable()
@@ -846,149 +895,16 @@ export class ParticipantService {
   }
 
   async getAvailableSurveyById(participantId: string, surveyId: string) {
-    if (!participantId) {
-      throw new BadRequestException('participantId is required');
-    }
-
-    if (!surveyId) {
-      throw new BadRequestException('surveyId is required');
-    }
-
-    const participant =
-      await this.getParticipantSurveyAccessContext(participantId);
-
-    const isVerified = this.isParticipantVerified(participant);
-
-    const survey = await this.prisma.survey.findUnique({
-      where: {
-        id: surveyId,
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        category: true,
-        audience: true,
-        status: true,
-        estimatedCompletionDays: true,
-        publishedAt: true,
-        questions: {
-          orderBy: {
-            order: 'asc',
-          },
-          select: {
-            id: true,
-            questionText: true,
-            type: true,
-            source: true,
-            order: true,
-            isRequired: true,
-            options: {
-              orderBy: {
-                order: 'asc',
-              },
-              select: {
-                id: true,
-                optionText: true,
-                order: true,
-              },
-            },
-          },
-        },
-        targetAudience: {
-          select: {
-            minimumAge: true,
-            maximumAge: true,
-            gender: true,
-            city: true,
-            district: true,
-            educationLevel: true,
-            occupation: true,
-            sampleBase: true,
-            estimatedReach: true,
-          },
-        },
-        sampleBudget: {
-          select: {
-            requiredResponses: true,
-            rewardPerParticipant: true,
-            currency: true,
-            totalBudget: true,
-            participantRewardBudget: true,
-            rewardDistribution: true,
-          },
-        },
-        responses: {
-          select: {
-            participantId: true,
-            status: true,
-          },
-        },
-      },
-    });
-
-    if (!survey || survey.status !== SurveyStatus.ACTIVE) {
-      throw new BadRequestException('Survey not found');
-    }
-
-    const alreadyStartedOrCompleted = survey.responses.some(
-      (response) => response.participantId === participantId,
-    );
-
-    if (alreadyStartedOrCompleted) {
-      throw new ForbiddenException(
-        'You have already started or completed this survey',
-      );
-    }
-
-    const completedResponses = survey.responses.filter(
-      (response) => response.status === SurveyResponseStatus.COMPLETED,
-    ).length;
-
-    const requiredResponses = survey.sampleBudget?.requiredResponses ?? 0;
-
-    if (requiredResponses > 0 && completedResponses >= requiredResponses) {
-      throw new ForbiddenException(
-        'This survey is no longer accepting responses',
-      );
-    }
-
-    const requiresVerified =
-      survey.audience === SurveyAudienceType.VERIFIED_USERS_ONLY ||
-      survey.targetAudience?.sampleBase ===
-        SurveyAudienceType.VERIFIED_USERS_ONLY;
-
-    const matchesProfile = this.matchesTargetAudience(
-      {
-        participantAge: participant.participantAge,
-        participantGender: participant.participantGender,
-        participantCity: participant.participantCity,
-        participantDistrict: participant.participantDistrict,
-        participantEducationLevel: participant.participantEducationLevel,
-        participantOccupation: participant.participantOccupation,
-      },
-      survey.targetAudience,
-    );
-
-    if (!matchesProfile) {
-      throw new ForbiddenException(
-        'You do not match the target audience for this survey',
-      );
-    }
-
-    if (requiresVerified && !isVerified) {
-      throw new ForbiddenException(
-        'Verify your identity to access this survey',
-      );
-    }
-
-    const rewardAmount = this.toNumber(
-      survey.sampleBudget?.rewardPerParticipant,
-    );
-    const completionPercentage =
-      requiredResponses > 0
-        ? Math.round((completedResponses / requiredResponses) * 100)
-        : 0;
+    const {
+      participant,
+      isVerified,
+      survey,
+      completedResponses,
+      requiredResponses,
+      requiresVerified,
+      rewardAmount,
+      completionPercentage,
+    } = await this.getSubmittableSurveyContext(participantId, surveyId);
 
     return {
       participant: {
@@ -1040,6 +956,108 @@ export class ParticipantService {
         surveyId: survey.id,
         questionCount: survey.questions.length,
         canSubmit: true,
+      },
+    };
+  }
+
+  async submitSurvey(
+    participantId: string,
+    surveyId: string,
+    dto: SubmitSurveyDto,
+  ) {
+    const {
+      participant,
+      survey,
+      completedResponses,
+      requiredResponses,
+      rewardAmount,
+    } = await this.getSubmittableSurveyContext(participantId, surveyId);
+
+    this.validateSurveyAnswers(survey, dto.answers);
+
+    const completedAt = new Date();
+
+    const submission = await this.prisma.$transaction(async (tx) => {
+      const surveyResponse = await tx.surveyResponse.create({
+        data: {
+          surveyId: survey.id,
+          participantId: participant.id,
+          status: SurveyResponseStatus.COMPLETED,
+          rewardAmount,
+          rewardStatus: RewardStatus.PENDING,
+          completedAt,
+        },
+        select: {
+          id: true,
+          surveyId: true,
+          participantId: true,
+          status: true,
+          rewardAmount: true,
+          rewardStatus: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      });
+
+      await tx.surveyResponseAnswer.createMany({
+        data: this.buildSurveyResponseAnswerRecords(
+          surveyResponse.id,
+          survey,
+          dto.answers,
+        ),
+      });
+
+      await tx.participantWallet.upsert({
+        where: {
+          userId: participant.id,
+        },
+        create: {
+          userId: participant.id,
+          pendingRewards: rewardAmount,
+          totalEarned: rewardAmount,
+          currency: survey.sampleBudget?.currency ?? SurveyBudgetCurrency.LKR,
+        },
+        update: {
+          pendingRewards: {
+            increment: rewardAmount,
+          },
+          totalEarned: {
+            increment: rewardAmount,
+          },
+        },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          userId: participant.id,
+          surveyResponseId: surveyResponse.id,
+          type: WalletTransactionType.SURVEY_REWARD,
+          status: WalletTransactionStatus.PENDING,
+          amount: rewardAmount,
+          currency: survey.sampleBudget?.currency ?? SurveyBudgetCurrency.LKR,
+          description: `Reward for completing survey: ${survey.title}`,
+        },
+      });
+
+      return surveyResponse;
+    });
+
+    return {
+      message: 'Survey submitted successfully',
+      submission: {
+        id: submission.id,
+        surveyId: submission.surveyId,
+        participantId: submission.participantId,
+        status: submission.status,
+        rewardAmount: this.toNumber(submission.rewardAmount),
+        rewardStatus: submission.rewardStatus,
+        completedAt: submission.completedAt,
+      },
+      summary: {
+        surveyTitle: survey.title,
+        answerCount: dto.answers.length,
+        completedResponses: completedResponses + 1,
+        requiredResponses,
       },
     };
   }
@@ -1379,6 +1397,322 @@ export class ParticipantService {
       availableSurveys,
       lockedSurveys,
     };
+  }
+
+  private async getSubmittableSurveyContext(
+    participantId: string,
+    surveyId: string,
+  ) {
+    if (!participantId) {
+      throw new BadRequestException('participantId is required');
+    }
+
+    if (!surveyId) {
+      throw new BadRequestException('surveyId is required');
+    }
+
+    const participant =
+      await this.getParticipantSurveyAccessContext(participantId);
+    const isVerified = this.isParticipantVerified(participant);
+
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        category: true,
+        audience: true,
+        status: true,
+        estimatedCompletionDays: true,
+        publishedAt: true,
+        questions: {
+          orderBy: {
+            order: 'asc',
+          },
+          select: {
+            id: true,
+            questionText: true,
+            type: true,
+            source: true,
+            order: true,
+            isRequired: true,
+            options: {
+              orderBy: {
+                order: 'asc',
+              },
+              select: {
+                id: true,
+                optionText: true,
+                order: true,
+              },
+            },
+          },
+        },
+        targetAudience: {
+          select: {
+            minimumAge: true,
+            maximumAge: true,
+            gender: true,
+            city: true,
+            district: true,
+            educationLevel: true,
+            occupation: true,
+            sampleBase: true,
+            estimatedReach: true,
+          },
+        },
+        sampleBudget: {
+          select: {
+            requiredResponses: true,
+            rewardPerParticipant: true,
+            currency: true,
+            totalBudget: true,
+            participantRewardBudget: true,
+            rewardDistribution: true,
+          },
+        },
+        responses: {
+          select: {
+            participantId: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!survey || survey.status !== SurveyStatus.ACTIVE) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    const alreadyStartedOrCompleted = survey.responses.some(
+      (response) => response.participantId === participantId,
+    );
+
+    if (alreadyStartedOrCompleted) {
+      throw new ForbiddenException(
+        'You have already started or completed this survey',
+      );
+    }
+
+    const completedResponses = survey.responses.filter(
+      (response) => response.status === SurveyResponseStatus.COMPLETED,
+    ).length;
+
+    const requiredResponses = survey.sampleBudget?.requiredResponses ?? 0;
+
+    if (requiredResponses > 0 && completedResponses >= requiredResponses) {
+      throw new ForbiddenException(
+        'This survey is no longer accepting responses',
+      );
+    }
+
+    const requiresVerified =
+      survey.audience === SurveyAudienceType.VERIFIED_USERS_ONLY ||
+      survey.targetAudience?.sampleBase ===
+        SurveyAudienceType.VERIFIED_USERS_ONLY;
+
+    const matchesProfile = this.matchesTargetAudience(
+      {
+        participantAge: participant.participantAge,
+        participantGender: participant.participantGender,
+        participantCity: participant.participantCity,
+        participantDistrict: participant.participantDistrict,
+        participantEducationLevel: participant.participantEducationLevel,
+        participantOccupation: participant.participantOccupation,
+      },
+      survey.targetAudience,
+    );
+
+    if (!matchesProfile) {
+      throw new ForbiddenException(
+        'You do not match the target audience for this survey',
+      );
+    }
+
+    if (requiresVerified && !isVerified) {
+      throw new ForbiddenException(
+        'Verify your identity to access this survey',
+      );
+    }
+
+    const rewardAmount = this.toNumber(
+      survey.sampleBudget?.rewardPerParticipant,
+    );
+    const completionPercentage =
+      requiredResponses > 0
+        ? Math.round((completedResponses / requiredResponses) * 100)
+        : 0;
+
+    return {
+      participant,
+      isVerified,
+      survey: survey as ParticipantAccessibleSurvey,
+      completedResponses,
+      requiredResponses,
+      requiresVerified,
+      rewardAmount,
+      completionPercentage,
+    };
+  }
+
+  private validateSurveyAnswers(
+    survey: ParticipantAccessibleSurvey,
+    answers: SubmitSurveyDto['answers'],
+  ) {
+    if (!answers.length) {
+      throw new BadRequestException('At least one answer is required');
+    }
+
+    const answerMap = new Map<string, SubmitSurveyDto['answers'][number]>();
+
+    for (const answer of answers) {
+      if (answerMap.has(answer.questionId)) {
+        throw new BadRequestException(
+          `Duplicate answers found for question "${answer.questionId}"`,
+        );
+      }
+
+      answerMap.set(answer.questionId, answer);
+    }
+
+    for (const question of survey.questions) {
+      const answer = answerMap.get(question.id);
+
+      if (question.isRequired && !answer) {
+        throw new BadRequestException(
+          `Answer is required for question "${question.questionText}"`,
+        );
+      }
+
+      if (!answer) {
+        continue;
+      }
+
+      const validOptionIds = new Set(
+        question.options.map((option) => option.id),
+      );
+
+      if (question.type === SurveyQuestionType.MULTIPLE_CHOICE) {
+        if (!answer.selectedOptionIds?.length) {
+          throw new BadRequestException(
+            `Please select at least one option for "${question.questionText}"`,
+          );
+        }
+
+        for (const optionId of answer.selectedOptionIds) {
+          if (!validOptionIds.has(optionId)) {
+            throw new BadRequestException(
+              `Invalid option selected for "${question.questionText}"`,
+            );
+          }
+        }
+      }
+
+      if (
+        question.type === SurveyQuestionType.SINGLE_SELECT ||
+        question.type === SurveyQuestionType.YES_NO
+      ) {
+        if (
+          question.type === SurveyQuestionType.YES_NO &&
+          typeof answer.yesNoValue === 'boolean'
+        ) {
+          continue;
+        }
+
+        if (
+          !answer.selectedOptionId ||
+          !validOptionIds.has(answer.selectedOptionId)
+        ) {
+          throw new BadRequestException(
+            `Please select a valid option for "${question.questionText}"`,
+          );
+        }
+      }
+
+      if (question.type === SurveyQuestionType.RATING_SCALE) {
+        if (
+          typeof answer.ratingValue !== 'number' ||
+          Number.isNaN(answer.ratingValue)
+        ) {
+          throw new BadRequestException(
+            `Please provide a valid rating for "${question.questionText}"`,
+          );
+        }
+      }
+
+      if (
+        question.type === SurveyQuestionType.SHORT_ANSWER ||
+        question.type === SurveyQuestionType.LONG_ANSWER
+      ) {
+        if (!answer.answerText?.trim()) {
+          throw new BadRequestException(
+            `Please provide an answer for "${question.questionText}"`,
+          );
+        }
+      }
+    }
+
+    for (const answer of answers) {
+      const questionExists = survey.questions.some(
+        (question) => question.id === answer.questionId,
+      );
+
+      if (!questionExists) {
+        throw new BadRequestException(
+          `Question "${answer.questionId}" does not belong to this survey`,
+        );
+      }
+    }
+  }
+
+  private buildSurveyResponseAnswerRecords(
+    surveyResponseId: string,
+    survey: ParticipantAccessibleSurvey,
+    answers: SubmitSurveyDto['answers'],
+  ) {
+    const questionMap = new Map(
+      survey.questions.map((question) => [question.id, question]),
+    );
+
+    return answers.map((answer) => {
+      const question = questionMap.get(answer.questionId);
+
+      if (!question) {
+        throw new BadRequestException(
+          `Question "${answer.questionId}" does not belong to this survey`,
+        );
+      }
+
+      const normalizedText = answer.answerText?.trim() || null;
+      const selectedOptionIds = [...(answer.selectedOptionIds ?? [])];
+      const selectedOptionId = answer.selectedOptionId ?? null;
+      const ratingValue =
+        typeof answer.ratingValue === 'number' ? answer.ratingValue : null;
+      const booleanValue =
+        typeof answer.yesNoValue === 'boolean' ? answer.yesNoValue : null;
+
+      if (
+        question.type === SurveyQuestionType.SINGLE_SELECT &&
+        selectedOptionId &&
+        selectedOptionIds.length === 0
+      ) {
+        selectedOptionIds.push(selectedOptionId);
+      }
+
+      return {
+        surveyResponseId,
+        questionId: question.id,
+        questionType: question.type,
+        answerText: normalizedText,
+        selectedOptionId,
+        selectedOptionIds,
+        ratingValue,
+        booleanValue,
+      };
+    });
   }
 
   private async getParticipantSurveyAccessContext(

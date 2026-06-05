@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UploadedFile,
   UseInterceptors,
@@ -17,6 +18,7 @@ import { ParticipantService } from './participant.service';
 import { AvailableSurveyDetailQueryDto } from './dto/available-survey-detail-query.dto';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
+import { SubmitSurveyDto } from './dto/submit-survey.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
 
 @Controller('participant')
@@ -41,6 +43,18 @@ export class ParticipantController {
     return this.participantService.getAvailableSurveyById(
       query.participantId,
       surveyId,
+    );
+  }
+
+  @Post('available-surveys/:surveyId/submit')
+  submitSurvey(
+    @Param('surveyId') surveyId: string,
+    @Body() body: SubmitSurveyDto,
+  ) {
+    return this.participantService.submitSurvey(
+      body.participantId,
+      surveyId,
+      body,
     );
   }
 
