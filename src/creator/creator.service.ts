@@ -333,6 +333,7 @@ export class CreatorService {
         take: safeLimit,
         select: {
           id: true,
+          status: true,
           rewardStatus: true,
           createdAt: true,
           startedAt: true,
@@ -544,10 +545,7 @@ export class CreatorService {
       );
     }
 
-    if (
-      submission.status === SurveyResponseStatus.REJECTED ||
-      submission.rewardStatus === RewardStatus.REJECTED
-    ) {
+    if (submission.status === SurveyResponseStatus.REJECTED) {
       throw new BadRequestException(
         'This submission has already been rejected',
       );
@@ -629,12 +627,6 @@ export class CreatorService {
     );
 
     if (submission.status === SurveyResponseStatus.REJECTED) {
-      throw new BadRequestException(
-        'This submission has already been rejected',
-      );
-    }
-
-    if (submission.rewardStatus === RewardStatus.REJECTED) {
       throw new BadRequestException(
         'This submission has already been rejected',
       );
@@ -1014,10 +1006,7 @@ export class CreatorService {
       );
     }
 
-    if (
-      submission.status === SurveyResponseStatus.REJECTED ||
-      submission.rewardStatus === RewardStatus.REJECTED
-    ) {
+    if (submission.status === SurveyResponseStatus.REJECTED) {
       throw new BadRequestException(
         `Submission "${submission.id}" has already been rejected`,
       );
@@ -1076,10 +1065,7 @@ export class CreatorService {
     tx: Prisma.TransactionClient,
     submission: SubmissionReviewTarget,
   ): Promise<ReviewedSubmissionResult> {
-    if (
-      submission.status === SurveyResponseStatus.REJECTED ||
-      submission.rewardStatus === RewardStatus.REJECTED
-    ) {
+    if (submission.status === SurveyResponseStatus.REJECTED) {
       throw new BadRequestException(
         `Submission "${submission.id}" has already been rejected`,
       );
@@ -1099,7 +1085,6 @@ export class CreatorService {
       },
       data: {
         status: SurveyResponseStatus.REJECTED,
-        rewardStatus: RewardStatus.REJECTED,
       },
       select: {
         id: true,
