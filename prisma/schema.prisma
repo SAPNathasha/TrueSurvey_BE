@@ -121,6 +121,7 @@ enum SurveyResponseStatus {
 enum RewardStatus {
   PENDING
   RELEASED
+  REJECTED
   WITHDRAWN
 }
 

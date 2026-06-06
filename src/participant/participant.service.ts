@@ -168,7 +168,6 @@ type ParticipantAccessibleSurvey = {
     educationLevel: string | null;
     occupation: string | null;
     sampleBase: SurveyAudienceType;
-    estimatedReach: number | null;
   } | null;
   sampleBudget: {
     requiredResponses: number;
@@ -1593,7 +1592,6 @@ export class ParticipantService {
             educationLevel: true,
             occupation: true,
             sampleBase: true,
-            estimatedReach: true,
           },
         },
         sampleBudget: {
