@@ -1435,6 +1435,182 @@ export class ParticipantService {
     };
   }
 
+  async getSurveySubmissions(userId: string) {
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can access survey submissions',
+      );
+    }
+
+    const submissions = await this.prisma.surveyResponse.findMany({
+      where: {
+        participantId: userId,
+      },
+      orderBy: {
+        completedAt: 'desc',
+      },
+      select: {
+        id: true,
+        rewardStatus: true,
+        rewardAmount: true,
+        completedAt: true,
+        createdAt: true,
+        survey: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    return {
+      participant: {
+        id: participant.id,
+        username: participant.username,
+      },
+      total: submissions.length,
+      submissions: submissions.map((submission) => ({
+        submissionId: submission.id,
+        surveyId: submission.survey.id,
+        surveyTitle: submission.survey.title,
+        rewardStatus: submission.rewardStatus,
+        submittedAt: submission.completedAt ?? submission.createdAt,
+        amount: this.toNumber(submission.rewardAmount),
+      })),
+    };
+  }
+
+  async deleteSurveySubmission(userId: string, submissionId: string) {
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    if (!submissionId) {
+      throw new BadRequestException('submissionId is required');
+    }
+
+    const participant = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Participant not found');
+    }
+
+    if (
+      participant.role !== UserRole.PARTICIPANT &&
+      participant.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException(
+        'Only participants can delete survey submissions',
+      );
+    }
+
+    const submission = await this.prisma.surveyResponse.findUnique({
+      where: {
+        id: submissionId,
+      },
+      select: {
+        id: true,
+        participantId: true,
+        rewardStatus: true,
+        rewardAmount: true,
+        surveyId: true,
+        survey: {
+          select: {
+            title: true,
+          },
+        },
+      },
+    });
+
+    if (!submission || submission.participantId !== userId) {
+      throw new ForbiddenException(
+        'You can only delete your own survey submissions',
+      );
+    }
+
+    if (submission.rewardStatus !== RewardStatus.PENDING) {
+      throw new BadRequestException(
+        'Only submissions with pending reward status can be deleted',
+      );
+    }
+
+    const rewardAmount = this.toNumber(submission.rewardAmount);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.walletTransaction.deleteMany({
+        where: {
+          surveyResponseId: submission.id,
+          userId,
+        },
+      });
+
+      if (rewardAmount > 0) {
+        await tx.participantWallet.update({
+          where: {
+            userId,
+          },
+          data: {
+            pendingRewards: {
+              decrement: rewardAmount,
+            },
+            totalEarned: {
+              decrement: rewardAmount,
+            },
+          },
+        });
+      }
+
+      await tx.surveyResponse.delete({
+        where: {
+          id: submission.id,
+        },
+      });
+    });
+
+    return {
+      message: 'Survey submission deleted successfully',
+      submission: {
+        id: submission.id,
+        surveyId: submission.surveyId,
+        surveyTitle: submission.survey.title,
+        rewardStatus: submission.rewardStatus,
+        amount: rewardAmount,
+      },
+    };
+  }
+
   async getTransactionRecords(
     userId: string,
     query: TransactionRecordsQueryDto,

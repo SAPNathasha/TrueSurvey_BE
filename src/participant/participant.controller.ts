@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -27,8 +28,11 @@ import { SubmitSurveyDto } from './dto/submit-survey.dto';
 import { TransactionRecordsQueryDto } from './dto/transaction-records-query.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
 import { VerifyNicDto } from './dto/verify-nic.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { User } from '../auth/decorators/user.decorator';
+import { UserRole } from '../generated/prisma/enums';
 
 @Controller('participant')
 export class ParticipantController {
@@ -70,6 +74,23 @@ export class ParticipantController {
   @Get('wallet')
   getWallet(@Query() query: ParticipantWalletQueryDto) {
     return this.participantService.getWallet(query);
+  }
+
+  @Get('submissions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.PARTICIPANT, UserRole.BOTH)
+  getSurveySubmissions(@User('sub') userId: string) {
+    return this.participantService.getSurveySubmissions(userId);
+  }
+
+  @Delete('submissions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.PARTICIPANT, UserRole.BOTH)
+  deleteSurveySubmission(
+    @User('sub') userId: string,
+    @Query('submissionId') submissionId: string,
+  ) {
+    return this.participantService.deleteSurveySubmission(userId, submissionId);
   }
 
   @Post('transactions')
