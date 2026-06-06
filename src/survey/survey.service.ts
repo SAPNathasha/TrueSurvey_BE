@@ -27,6 +27,7 @@ import {
   SurveyPublishOption,
   SurveyQuestionSource,
   SurveyQuestionType,
+  SurveyResponseStatus,
   SurveyStatus,
   UserRole,
 } from '../generated/prisma/enums';
@@ -313,6 +314,146 @@ export class SurveyService {
     return {
       surveyId,
       questions,
+    };
+  }
+
+  async getSurveyAnalytics(userId: string, surveyId: string) {
+    await this.validateSurveyCreatorAccess(userId, surveyId);
+
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        questions: {
+          orderBy: {
+            order: 'asc',
+          },
+          select: {
+            id: true,
+            questionText: true,
+            type: true,
+            order: true,
+            isRequired: true,
+            options: {
+              orderBy: {
+                order: 'asc',
+              },
+              select: {
+                id: true,
+                optionText: true,
+                order: true,
+              },
+            },
+            responseAnswers: {
+              where: {
+                surveyResponse: {
+                  status: SurveyResponseStatus.COMPLETED,
+                },
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+              select: {
+                id: true,
+                answerText: true,
+                selectedOptionId: true,
+                selectedOptionIds: true,
+                ratingValue: true,
+                booleanValue: true,
+                createdAt: true,
+                surveyResponse: {
+                  select: {
+                    id: true,
+                    participantId: true,
+                    completedAt: true,
+                    createdAt: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          where: {
+            status: SurveyResponseStatus.COMPLETED,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!survey) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    return {
+      survey: {
+        id: survey.id,
+        title: survey.title,
+        description: survey.description,
+        status: survey.status,
+        totalCompletedSubmissions: survey.responses.length,
+      },
+      questions: survey.questions.map((question) => {
+        const optionSelectionCounts = new Map<string, number>();
+
+        for (const option of question.options) {
+          optionSelectionCounts.set(option.id, 0);
+        }
+
+        for (const answer of question.responseAnswers) {
+          if (answer.selectedOptionId) {
+            optionSelectionCounts.set(
+              answer.selectedOptionId,
+              (optionSelectionCounts.get(answer.selectedOptionId) ?? 0) + 1,
+            );
+          }
+
+          for (const optionId of answer.selectedOptionIds) {
+            optionSelectionCounts.set(
+              optionId,
+              (optionSelectionCounts.get(optionId) ?? 0) + 1,
+            );
+          }
+        }
+
+        return {
+          questionId: question.id,
+          question: question.questionText,
+          questionType: question.type,
+          order: question.order,
+          isRequired: question.isRequired,
+          totalAnswers: question.responseAnswers.length,
+          options: question.options.map((option) => ({
+            id: option.id,
+            optionText: option.optionText,
+            order: option.order,
+            selectionCount: optionSelectionCounts.get(option.id) ?? 0,
+          })),
+          answers: question.responseAnswers.map((answer) => ({
+            answerId: answer.id,
+            submissionId: answer.surveyResponse.id,
+            participantId: answer.surveyResponse.participantId,
+            submittedAt:
+              answer.surveyResponse.completedAt ??
+              answer.surveyResponse.createdAt ??
+              answer.createdAt,
+            answerText: answer.answerText,
+            selectedOptionId: answer.selectedOptionId,
+            selectedOptionIds: answer.selectedOptionIds,
+            ratingValue: answer.ratingValue,
+            booleanValue: answer.booleanValue,
+          })),
+        };
+      }),
     };
   }
 

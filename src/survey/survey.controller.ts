@@ -23,6 +23,9 @@ import { EstimateAudienceReachQueryDto } from './dto/estimate-audience-reach-que
 import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { UserRole } from '../generated/prisma/enums';
 
 @Controller('surveys')
 export class SurveyController {
@@ -73,6 +76,16 @@ export class SurveyController {
     @Query('creatorId') creatorId: string,
   ) {
     return this.surveyService.getSurveyQuestions(creatorId, surveyId);
+  }
+
+  @Get(':surveyId/analytics')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
+  getSurveyAnalytics(
+    @Param('surveyId') surveyId: string,
+    @User('sub') userId: string,
+  ) {
+    return this.surveyService.getSurveyAnalytics(userId, surveyId);
   }
 
   @Patch(':surveyId/questions/complete')
