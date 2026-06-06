@@ -13,6 +13,7 @@ import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
 import { PublishSurveyDto } from './dto/publish-survey.dto';
+import { EstimateAudienceReachQueryDto } from './dto/estimate-audience-reach-query.dto';
 
 import { Prisma } from '../generated/prisma/client';
 
@@ -505,8 +506,6 @@ export class SurveyService {
       );
     }
 
-    const estimatedReach = await this.estimateAudienceReach(dto);
-
     const targetAudience = await this.prisma.surveyTargetAudience.upsert({
       where: {
         surveyId,
@@ -521,7 +520,6 @@ export class SurveyService {
         educationLevel: dto.educationLevel,
         occupation: dto.occupation,
         sampleBase: dto.sampleBase,
-        estimatedReach,
       },
       update: {
         minimumAge: dto.minimumAge,
@@ -532,7 +530,6 @@ export class SurveyService {
         educationLevel: dto.educationLevel,
         occupation: dto.occupation,
         sampleBase: dto.sampleBase,
-        estimatedReach,
       },
       select: {
         id: true,
@@ -544,7 +541,6 @@ export class SurveyService {
         educationLevel: true,
         occupation: true,
         sampleBase: true,
-        estimatedReach: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -593,7 +589,6 @@ export class SurveyService {
       },
       select: {
         id: true,
-        estimatedReach: true,
       },
     });
 
@@ -611,17 +606,6 @@ export class SurveyService {
 
     if (dto.totalBudget <= 0) {
       throw new BadRequestException('Total budget must be greater than 0');
-    }
-
-    if (
-      targetAudience.estimatedReach !== null &&
-      targetAudience.estimatedReach !== undefined &&
-      targetAudience.estimatedReach > 0 &&
-      dto.requiredResponses > targetAudience.estimatedReach
-    ) {
-      throw new BadRequestException(
-        'Required responses cannot be greater than estimated audience reach',
-      );
     }
 
     const platformCommissionAmount =
@@ -725,6 +709,42 @@ export class SurveyService {
     };
   }
 
+  async getEstimatedReach(
+    userId: string,
+    surveyId: string,
+    query: EstimateAudienceReachQueryDto,
+  ) {
+    if (
+      query.minimumAge !== undefined &&
+      query.maximumAge !== undefined &&
+      query.minimumAge > query.maximumAge
+    ) {
+      throw new BadRequestException(
+        'Minimum age cannot be greater than maximum age',
+      );
+    }
+
+    await this.validateSurveyCreatorAccess(userId, surveyId);
+
+    const estimatedReach = await this.estimateAudienceReach(query);
+
+    return {
+      surveyId,
+      estimatedReach,
+      targetAudience: {
+        minimumAge: query.minimumAge ?? null,
+        maximumAge: query.maximumAge ?? null,
+        gender: query.gender ?? AudienceGender.ALL,
+        city: query.city ?? null,
+        district: query.district ?? null,
+        educationLevel: query.educationLevel ?? null,
+        occupation: query.occupation ?? null,
+        sampleBase: query.sampleBase,
+      },
+      calculatedAt: new Date(),
+    };
+  }
+
   async getSurveyPreview(creatorId: string, surveyId: string) {
     await this.validateEditableSurveyForCreator({
       creatorId,
@@ -783,7 +803,6 @@ export class SurveyService {
             educationLevel: true,
             occupation: true,
             sampleBase: true,
-            estimatedReach: true,
           },
         },
 
@@ -1024,6 +1043,54 @@ export class SurveyService {
     return survey;
   }
 
+  private async validateSurveyCreatorAccess(userId: string, surveyId: string) {
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    if (!surveyId) {
+      throw new BadRequestException('surveyId is required');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.role !== UserRole.CREATOR && user.role !== UserRole.BOTH) {
+      throw new ForbiddenException('Only creators can access this survey');
+    }
+
+    const survey = await this.prisma.survey.findUnique({
+      where: {
+        id: surveyId,
+      },
+      select: {
+        id: true,
+        creatorId: true,
+      },
+    });
+
+    if (!survey) {
+      throw new BadRequestException('Survey not found');
+    }
+
+    if (survey.creatorId !== userId) {
+      throw new ForbiddenException('You cannot access this survey');
+    }
+
+    return survey;
+  }
+
   private getSurveyReadinessChecklist(survey: {
     title?: string | null;
     description?: string | null;
@@ -1055,7 +1122,6 @@ export class SurveyService {
     const optionRequiredTypes: SurveyQuestionType[] = [
       SurveyQuestionType.MULTIPLE_CHOICE,
       SurveyQuestionType.SINGLE_SELECT,
-      SurveyQuestionType.RATING_SCALE,
       SurveyQuestionType.YES_NO,
     ];
 
@@ -1069,7 +1135,7 @@ export class SurveyService {
 
     if (!needsOptions && options.length > 0) {
       throw new BadRequestException(
-        'Short answer and long answer questions should not have options',
+        'Only multiple choice, single select, and yes/no questions should have options',
       );
     }
   }
@@ -1106,29 +1172,82 @@ export class SurveyService {
   }
 
   private async estimateAudienceReach(
-    dto: SetTargetAudienceDto,
+    dto: Pick<
+      EstimateAudienceReachQueryDto,
+      | 'minimumAge'
+      | 'maximumAge'
+      | 'gender'
+      | 'city'
+      | 'district'
+      | 'educationLevel'
+      | 'occupation'
+      | 'sampleBase'
+    >,
   ): Promise<number> {
-    if (dto.sampleBase === SurveyAudienceType.VERIFIED_USERS_ONLY) {
-      return this.prisma.user.count({
-        where: {
-          role: {
-            in: [UserRole.PARTICIPANT, UserRole.BOTH],
-          },
-          nicImagePath: {
-            not: null,
-          },
-          selfiePath: {
-            not: null,
-          },
-        },
-      });
-    }
-
     return this.prisma.user.count({
       where: {
         role: {
           in: [UserRole.PARTICIPANT, UserRole.BOTH],
         },
+        ...(dto.sampleBase === SurveyAudienceType.VERIFIED_USERS_ONLY
+          ? {
+              isIdentityVerified: true,
+            }
+          : {}),
+        ...(dto.minimumAge !== undefined
+          ? {
+              participantAge: {
+                gte: dto.minimumAge,
+              },
+            }
+          : {}),
+        ...(dto.maximumAge !== undefined
+          ? {
+              participantAge: {
+                ...(dto.minimumAge !== undefined
+                  ? { gte: dto.minimumAge }
+                  : {}),
+                lte: dto.maximumAge,
+              },
+            }
+          : {}),
+        ...(dto.gender && dto.gender !== AudienceGender.ALL
+          ? {
+              participantGender: dto.gender,
+            }
+          : {}),
+        ...(dto.city
+          ? {
+              participantCity: {
+                equals: dto.city,
+                mode: 'insensitive' as const,
+              },
+            }
+          : {}),
+        ...(dto.district
+          ? {
+              participantDistrict: {
+                equals: dto.district,
+                mode: 'insensitive' as const,
+              },
+            }
+          : {}),
+        ...(dto.educationLevel
+          ? {
+              participantEducationLevel: {
+                equals: dto.educationLevel,
+                mode: 'insensitive' as const,
+              },
+            }
+          : {}),
+        ...(dto.occupation
+          ? {
+              participantOccupation: {
+                equals: dto.occupation,
+                mode: 'insensitive' as const,
+              },
+            }
+          : {}),
       },
     });
   }

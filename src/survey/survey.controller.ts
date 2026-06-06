@@ -18,6 +18,7 @@ import { CreatorIdDto } from './dto/creator-id.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
 import { PublishSurveyDto } from './dto/publish-survey.dto';
+import { EstimateAudienceReachQueryDto } from './dto/estimate-audience-reach-query.dto';
 
 @Controller('surveys')
 export class SurveyController {
@@ -108,6 +109,15 @@ export class SurveyController {
   ) {
     return this.surveyService.setSampleBudget(body.creatorId, surveyId, body);
   }
+
+  @Get(':surveyId/estimated-reach')
+  getEstimatedReach(
+    @Param('surveyId') surveyId: string,
+    @Query() query: EstimateAudienceReachQueryDto,
+  ) {
+    return this.surveyService.getEstimatedReach(query.userId, surveyId, query);
+  }
+
   @Get(':surveyId/preview')
   getSurveyPreview(
     @Param('surveyId') surveyId: string,

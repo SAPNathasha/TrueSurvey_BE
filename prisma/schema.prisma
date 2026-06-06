@@ -313,8 +313,6 @@ model SurveyTargetAudience {
 
   sampleBase SurveyAudienceType @default(GENERAL)
 
-  estimatedReach Int?
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
