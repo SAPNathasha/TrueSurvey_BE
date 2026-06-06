@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 
 import { SurveyService } from './survey.service';
@@ -19,6 +20,9 @@ import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
 import { PublishSurveyDto } from './dto/publish-survey.dto';
 import { EstimateAudienceReachQueryDto } from './dto/estimate-audience-reach-query.dto';
+import { GenerateAiQuestionsDto } from './dto/generate-ai-questions.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { User } from '../auth/decorators/user.decorator';
 
 @Controller('surveys')
 export class SurveyController {
@@ -51,6 +55,16 @@ export class SurveyController {
       surveyId,
       body,
     );
+  }
+
+  @Post(':surveyId/questions/ai')
+  @UseGuards(JwtAuthGuard)
+  generateAiQuestions(
+    @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
+    @Body() body: GenerateAiQuestionsDto,
+  ) {
+    return this.surveyService.generateAiQuestions(creatorId, surveyId, body);
   }
 
   @Get(':surveyId/questions')

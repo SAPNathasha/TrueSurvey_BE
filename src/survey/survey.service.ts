@@ -32,10 +32,25 @@ import {
 } from '../generated/prisma/enums';
 
 type GeneratedQuestion = {
+  order: number;
   questionText: string;
   type: SurveyQuestionType;
   options: string[];
   isRequired: boolean;
+};
+
+type AiQuestionServiceResponse = {
+  surveyTitle?: string;
+  questions?: AiQuestionServiceQuestion[];
+};
+
+type AiQuestionServiceQuestion = {
+  order?: number;
+  questionText?: string;
+  type?: string;
+  options?: unknown[];
+  isRequired?: boolean;
+  helpText?: string;
 };
 
 @Injectable()
@@ -155,7 +170,7 @@ export class SurveyService {
       expectedMethod: SurveyCreationMethod.AI_ASSISTED,
     });
 
-    const generatedQuestions = this.generateMockAiQuestions(dto);
+    const generatedQuestions = await this.requestAiQuestions(dto);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.surveyQuestion.deleteMany({
@@ -165,16 +180,14 @@ export class SurveyService {
         },
       });
 
-      for (let i = 0; i < generatedQuestions.length; i += 1) {
-        const generatedQuestion = generatedQuestions[i];
-
+      for (const generatedQuestion of generatedQuestions) {
         const question = await tx.surveyQuestion.create({
           data: {
             surveyId,
             questionText: generatedQuestion.questionText,
             type: generatedQuestion.type,
             source: SurveyQuestionSource.AI_GENERATED,
-            order: i + 1,
+            order: generatedQuestion.order,
             isRequired: generatedQuestion.isRequired,
           },
         });
@@ -205,8 +218,17 @@ export class SurveyService {
     return {
       message: 'AI questions generated successfully',
       surveyId,
+      surveyTitle: dto.title,
       currentStep: SurveyCreationStep.CREATE_QUESTIONS,
-      questions,
+      questions: questions.map((question) => ({
+        id: question.id,
+        order: question.order,
+        questionText: question.questionText,
+        type: question.type,
+        options: question.options.map((option) => option.optionText),
+        isRequired: question.isRequired,
+        source: question.source,
+      })),
     };
   }
 
@@ -1252,103 +1274,157 @@ export class SurveyService {
     });
   }
 
-  private generateMockAiQuestions(
+  private async requestAiQuestions(
     dto: GenerateAiQuestionsDto,
+  ): Promise<GeneratedQuestion[]> {
+    const baseUrl =
+      process.env.AI_QUESTION_SERVICE_BASE_URL ?? 'http://127.0.0.1:8000';
+    const apiKey = process.env.FASTAPI_API_KEY;
+    const endpoint = `${baseUrl.replace(/\/$/, '')}/api/ai/questions/generate`;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'x-api-key': apiKey } : {}),
+      },
+      body: JSON.stringify({
+        title: dto.title,
+        description: dto.description,
+        maxNumberOfQuestions: dto.maxNumberOfQuestions,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      throw new BadRequestException(
+        `AI question generation failed with status ${response.status}: ${errorText}`,
+      );
+    }
+
+    const result = (await response.json()) as AiQuestionServiceResponse;
+
+    return this.normalizeAiGeneratedQuestions(result, dto.maxNumberOfQuestions);
+  }
+
+  private normalizeAiGeneratedQuestions(
+    response: AiQuestionServiceResponse,
+    maxNumberOfQuestions: number,
   ): GeneratedQuestion[] {
-    const requestedCount = dto.numberOfQuestions;
+    const rawQuestions = Array.isArray(response.questions)
+      ? response.questions
+      : [];
 
-    const baseQuestions: GeneratedQuestion[] = [
-      {
-        questionText: `How satisfied are you with your overall experience with ${dto.surveyTitle}?`,
-        type: SurveyQuestionType.RATING_SCALE,
-        options: ['1', '2', '3', '4', '5'],
-        isRequired: true,
-      },
-      {
-        questionText: 'Which part of the service are you most satisfied with?',
-        type: SurveyQuestionType.MULTIPLE_CHOICE,
-        options: [
-          'Product quality',
-          'Delivery speed',
-          'Customer support',
-          'Pricing',
-        ],
-        isRequired: true,
-      },
-      {
-        questionText: 'How likely are you to recommend this service to others?',
-        type: SurveyQuestionType.RATING_SCALE,
-        options: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-        isRequired: true,
-      },
-      {
-        questionText: 'What could we improve to serve you better?',
-        type: SurveyQuestionType.SHORT_ANSWER,
-        options: [],
-        isRequired: false,
-      },
-      {
-        questionText: 'How would you rate the quality of customer support?',
-        type: SurveyQuestionType.RATING_SCALE,
-        options: ['1', '2', '3', '4', '5'],
-        isRequired: true,
-      },
-      {
-        questionText: 'Was the delivery process convenient for you?',
-        type: SurveyQuestionType.SINGLE_SELECT,
-        options: ['Yes', 'No', 'Somewhat'],
-        isRequired: true,
-      },
-      {
-        questionText: 'Which areas should we focus on improving?',
-        type: SurveyQuestionType.MULTIPLE_CHOICE,
-        options:
-          dto.focusAreas.length > 0
-            ? dto.focusAreas
-            : ['Quality', 'Support', 'Delivery', 'Pricing'],
-        isRequired: true,
-      },
-      {
-        questionText: 'How clear was the information provided before purchase?',
-        type: SurveyQuestionType.RATING_SCALE,
-        options: ['1', '2', '3', '4', '5'],
-        isRequired: true,
-      },
-      {
-        questionText: 'What was the main reason for choosing our service?',
-        type: SurveyQuestionType.SINGLE_SELECT,
-        options: [
-          'Price',
-          'Quality',
-          'Recommendation',
-          'Convenience',
-          'Brand trust',
-        ],
-        isRequired: true,
-      },
-      {
-        questionText: 'Please share any additional feedback or suggestions.',
-        type: SurveyQuestionType.LONG_ANSWER,
-        options: [],
-        isRequired: false,
-      },
-    ];
+    const normalizedQuestions = rawQuestions
+      .map((question, index) => this.normalizeSingleAiQuestion(question, index))
+      .filter((question): question is GeneratedQuestion => question !== null)
+      .slice(0, maxNumberOfQuestions);
 
-    if (requestedCount <= baseQuestions.length) {
-      return baseQuestions.slice(0, requestedCount);
+    if (normalizedQuestions.length === 0) {
+      throw new BadRequestException(
+        'AI question generation returned no usable questions',
+      );
     }
 
-    const questions = [...baseQuestions];
+    return normalizedQuestions.map((question, index) => ({
+      ...question,
+      order: index + 1,
+    }));
+  }
 
-    for (let i = baseQuestions.length + 1; i <= requestedCount; i += 1) {
-      questions.push({
-        questionText: `Additional feedback question ${i} for ${dto.surveyTitle}`,
-        type: SurveyQuestionType.SHORT_ANSWER,
-        options: [],
-        isRequired: false,
-      });
+  private normalizeSingleAiQuestion(
+    question: AiQuestionServiceQuestion,
+    fallbackIndex: number,
+  ): GeneratedQuestion | null {
+    const questionText = question?.questionText?.trim();
+
+    if (!questionText) {
+      return null;
     }
 
-    return questions;
+    const type = this.normalizeAiQuestionType(question.type, question.options);
+    const isRequired = question.isRequired ?? true;
+    const options = this.normalizeAiQuestionOptions(type, question.options);
+
+    return {
+      order:
+        typeof question.order === 'number' && question.order > 0
+          ? question.order
+          : fallbackIndex + 1,
+      questionText,
+      type,
+      options,
+      isRequired,
+    };
+  }
+
+  private normalizeAiQuestionType(
+    rawType: string | undefined,
+    rawOptions: unknown[] | undefined,
+  ): SurveyQuestionType {
+    const normalizedType = rawType?.trim().toUpperCase();
+    const supportedTypes = new Set<string>(Object.values(SurveyQuestionType));
+
+    if (normalizedType && supportedTypes.has(normalizedType)) {
+      return normalizedType as SurveyQuestionType;
+    }
+
+    const options = Array.isArray(rawOptions)
+      ? rawOptions
+          .map((option) => (typeof option === 'string' ? option.trim() : ''))
+          .filter((option) => option.length > 0)
+      : [];
+
+    if (options.length === 2) {
+      const yesNoOptions = options.map((option) => option.toLowerCase());
+      if (yesNoOptions.includes('yes') && yesNoOptions.includes('no')) {
+        return SurveyQuestionType.YES_NO;
+      }
+    }
+
+    if (options.length >= 2) {
+      return SurveyQuestionType.SINGLE_SELECT;
+    }
+
+    return SurveyQuestionType.SHORT_ANSWER;
+  }
+
+  private normalizeAiQuestionOptions(
+    type: SurveyQuestionType,
+    rawOptions: unknown[] | undefined,
+  ): string[] {
+    const options = Array.isArray(rawOptions)
+      ? [
+          ...new Set(
+            rawOptions
+              .map((option) =>
+                typeof option === 'string' ? option.trim() : '',
+              )
+              .filter((option) => option.length > 0),
+          ),
+        ]
+      : [];
+
+    if (type === SurveyQuestionType.RATING_SCALE) {
+      return options.length >= 2 ? options : ['1', '2', '3', '4', '5'];
+    }
+
+    if (type === SurveyQuestionType.YES_NO) {
+      return ['Yes', 'No'];
+    }
+
+    if (
+      type === SurveyQuestionType.MULTIPLE_CHOICE ||
+      type === SurveyQuestionType.SINGLE_SELECT
+    ) {
+      if (options.length >= 2) {
+        return options;
+      }
+
+      return ['Option 1', 'Option 2'];
+    }
+
+    return [];
   }
 }

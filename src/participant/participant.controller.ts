@@ -24,6 +24,7 @@ import { AvailableSurveyDetailQueryDto } from './dto/available-survey-detail-que
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { SubmitSurveyDto } from './dto/submit-survey.dto';
+import { TransactionRecordsQueryDto } from './dto/transaction-records-query.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
 import { VerifyNicDto } from './dto/verify-nic.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -69,6 +70,15 @@ export class ParticipantController {
   @Get('wallet')
   getWallet(@Query() query: ParticipantWalletQueryDto) {
     return this.participantService.getWallet(query);
+  }
+
+  @Post('transactions')
+  @UseGuards(JwtAuthGuard)
+  getTransactionRecords(
+    @User('sub') userId: string,
+    @Body() body: TransactionRecordsQueryDto,
+  ) {
+    return this.participantService.getTransactionRecords(userId, body);
   }
 
   @Get('profile-settings')

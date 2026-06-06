@@ -10,6 +10,7 @@ import { PrismaService } from '../auth/prisma/prisma.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { SubmitSurveyDto } from './dto/submit-survey.dto';
+import { TransactionRecordsQueryDto } from './dto/transaction-records-query.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
 import { VerifyNicDto } from './dto/verify-nic.dto';
 import { StorageService } from '../auth/storage/storage.service';
@@ -1431,6 +1432,128 @@ export class ParticipantService {
         'Keep your profile updated for better matches.',
         'Withdrawals are processed within 1–3 business days.',
       ],
+    };
+  }
+
+  async getTransactionRecords(
+    userId: string,
+    query: TransactionRecordsQueryDto,
+  ) {
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        wallet: {
+          select: {
+            pendingRewards: true,
+            totalEarned: true,
+            totalWithdrawn: true,
+            currency: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (
+      user.role !== UserRole.PARTICIPANT &&
+      user.role !== UserRole.CREATOR &&
+      user.role !== UserRole.BOTH
+    ) {
+      throw new ForbiddenException('You cannot access transaction records');
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const safePage = Math.max(page, 1);
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const skip = (safePage - 1) * safeLimit;
+
+    const [total, totalPendingItems, totalTopupAggregate, transactions] =
+      await Promise.all([
+        this.prisma.walletTransaction.count({
+          where: {
+            userId,
+          },
+        }),
+        this.prisma.walletTransaction.count({
+          where: {
+            userId,
+            status: WalletTransactionStatus.PENDING,
+          },
+        }),
+        this.prisma.walletTransaction.aggregate({
+          where: {
+            userId,
+            type: WalletTransactionType.ADJUSTMENT,
+            status: WalletTransactionStatus.COMPLETED,
+          },
+          _sum: {
+            amount: true,
+          },
+        }),
+        this.prisma.walletTransaction.findMany({
+          where: {
+            userId,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          skip,
+          take: safeLimit,
+          select: {
+            id: true,
+            amount: true,
+            type: true,
+            status: true,
+            currency: true,
+            description: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+    return {
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+      summary: {
+        totalPendingItems,
+        totalTopupAmount: this.toNumber(totalTopupAggregate._sum.amount),
+        paidOutAmount: this.toNumber(user.wallet?.totalWithdrawn),
+        totalRewardsEarned: this.toNumber(user.wallet?.totalEarned),
+        currency: user.wallet?.currency ?? SurveyBudgetCurrency.LKR,
+      },
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+        showingFrom: total === 0 ? 0 : skip + 1,
+        showingTo: Math.min(skip + safeLimit, total),
+      },
+      transactions: transactions.map((transaction) => ({
+        id: transaction.id,
+        date: transaction.createdAt,
+        amount: this.toNumber(transaction.amount),
+        type: transaction.type,
+        status: transaction.status,
+        currency: transaction.currency,
+        description: transaction.description,
+      })),
     };
   }
 
