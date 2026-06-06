@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 
@@ -7,7 +7,10 @@ import { AuthService } from './auth.service';
 import { PrismaService } from './prisma/prisma.service';
 import { StorageService } from './storage/storage.service';
 import { MailService } from './mail/mail.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
+@Global()
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -22,7 +25,9 @@ import { MailService } from './mail/mail.service';
     StorageService,
     MailService,
     JwtService,
+    JwtAuthGuard,
+    RolesGuard,
   ],
-  exports: [AuthService],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule],
 })
 export class AuthModule {}

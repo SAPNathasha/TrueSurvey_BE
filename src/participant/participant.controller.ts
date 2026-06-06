@@ -7,10 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFiles,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  FileFieldsInterceptor,
+  FileInterceptor,
+} from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Express } from 'express';
 
@@ -20,6 +25,9 @@ import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { SubmitSurveyDto } from './dto/submit-survey.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
+import { VerifyNicDto } from './dto/verify-nic.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { User } from '../auth/decorators/user.decorator';
 
 @Controller('participant')
 export class ParticipantController {
@@ -71,6 +79,53 @@ export class ParticipantController {
   @Patch('profile-settings')
   updateProfileSettings(@Body() body: UpdateParticipantProfileDto) {
     return this.participantService.updateProfileSettings(body);
+  }
+
+  @Post('verify-nic')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'identityFrontImage', maxCount: 1 },
+        { name: 'selfieImage', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        fileFilter: (req, file, callback) => {
+          const allowedMimeTypes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
+          ];
+
+          if (!allowedMimeTypes.includes(file.mimetype)) {
+            return callback(
+              new BadRequestException(
+                'Only JPG, JPEG, PNG, and WEBP images are allowed',
+              ),
+              false,
+            );
+          }
+
+          callback(null, true);
+        },
+        limits: {
+          fileSize: 5 * 1024 * 1024,
+        },
+      },
+    ),
+  )
+  verifyNic(
+    @User('sub') userId: string,
+    @Body() body: VerifyNicDto,
+    @UploadedFiles()
+    files: {
+      identityFrontImage?: Express.Multer.File[];
+      selfieImage?: Express.Multer.File[];
+    },
+  ) {
+    return this.participantService.verifyNic(userId, body, files);
   }
 
   @Patch('settings/profile-photo')

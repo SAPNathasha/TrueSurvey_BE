@@ -152,6 +152,7 @@ model User {
   nicHash      String? @unique
   nicImagePath String?
   selfiePath   String?
+  isIdentityVerified Boolean @default(false)
 
   profileImagePath String?
   isEmailVerified  Boolean @default(false)

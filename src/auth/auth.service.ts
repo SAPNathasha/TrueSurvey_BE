@@ -15,11 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { StorageService } from './storage/storage.service';
 import { MailService } from './mail/mail.service';
 import { UserRole } from '../generated/prisma/enums';
-
-type TokenPayload = {
-  sub: string;
-  role: UserRole;
-};
+import { TokenPayload } from './types/token-payload.type';
 
 type RegisterResponse = {
   message: string;
@@ -94,6 +90,9 @@ export class AuthService {
       where: {
         email,
       },
+      select: {
+        id: true,
+      },
     });
 
     if (existingUser) {
@@ -108,6 +107,9 @@ export class AuthService {
       const existingNicUser = await this.prisma.user.findUnique({
         where: {
           nicHash,
+        },
+        select: {
+          id: true,
         },
       });
 
@@ -175,6 +177,13 @@ export class AuthService {
       where: {
         email,
       },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        password: true,
+        role: true,
+      },
     });
 
     if (!user) {
@@ -189,6 +198,8 @@ export class AuthService {
 
     const payload: TokenPayload = {
       sub: user.id,
+      email: user.email,
+      username: user.username,
       role: user.role,
     };
 
@@ -218,7 +229,11 @@ export class AuthService {
       where: {
         id: userId,
       },
-      include: {
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
         refreshTokens: true,
       },
     });
@@ -248,6 +263,8 @@ export class AuthService {
 
     const payload: TokenPayload = {
       sub: user.id,
+      email: user.email,
+      username: user.username,
       role: user.role,
     };
 
@@ -278,6 +295,10 @@ export class AuthService {
       const user = await this.prisma.user.findUnique({
         where: {
           email,
+        },
+        select: {
+          id: true,
+          email: true,
         },
       });
 

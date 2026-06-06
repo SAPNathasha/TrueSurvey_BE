@@ -1,16 +1,20 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 
 import { PrismaService } from '../auth/prisma/prisma.service';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { SubmitSurveyDto } from './dto/submit-survey.dto';
 import { UpdateParticipantProfileDto } from './dto/update-participant-profile.dto';
+import { VerifyNicDto } from './dto/verify-nic.dto';
 import { StorageService } from '../auth/storage/storage.service';
 import type { Express } from 'express';
+import { IdentityVerificationQueue } from './identity-verification.queue';
 
 import {
   AudienceGender,
@@ -124,6 +128,7 @@ type ParticipantSurveyAccessContext = {
   role: UserRole;
   nicImagePath: string | null;
   selfiePath: string | null;
+  isIdentityVerified: boolean;
   participantAge: number | null;
   participantGender: AudienceGender | null;
   participantCity: string | null;
@@ -184,6 +189,7 @@ export class ParticipantService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly identityVerificationQueue: IdentityVerificationQueue,
   ) {}
 
   async getProfileSettings(participantId: string) {
@@ -208,6 +214,7 @@ export class ParticipantService {
 
         profileImagePath: true,
         isEmailVerified: true,
+        isIdentityVerified: true,
 
         nicImagePath: true,
         selfiePath: true,
@@ -246,10 +253,6 @@ export class ParticipantService {
       );
     }
 
-    const isVerified = Boolean(
-      participant.nicImagePath && participant.selfiePath,
-    );
-
     return {
       profile: {
         id: participant.id,
@@ -262,6 +265,7 @@ export class ParticipantService {
         dateOfBirth: participant.dateOfBirth,
 
         profileImagePath: participant.profileImagePath,
+        isIdentityVerified: participant.isIdentityVerified,
 
         participantAge: participant.participantAge,
         participantGender: participant.participantGender,
@@ -276,7 +280,9 @@ export class ParticipantService {
         memberSince: participant.createdAt,
         accountStatus: 'ACTIVE',
         emailVerified: participant.isEmailVerified,
-        verificationStatus: isVerified ? 'VERIFIED' : 'NOT_VERIFIED',
+        verificationStatus: participant.isIdentityVerified
+          ? 'VERIFIED'
+          : 'NOT_VERIFIED',
         totalSurveysCompleted: participant.surveyResponses.length,
       },
     };
@@ -358,6 +364,133 @@ export class ParticipantService {
     };
   }
 
+  async verifyNic(
+    userId: string,
+    dto: VerifyNicDto,
+    files: {
+      identityFrontImage?: Express.Multer.File[];
+      selfieImage?: Express.Multer.File[];
+    },
+  ) {
+    try {
+      const identityFrontImage = files?.identityFrontImage?.[0];
+      const selfieImage = files?.selfieImage?.[0];
+
+      if (!userId) {
+        throw new BadRequestException('userId is required');
+      }
+
+      if (!dto.nicNumber?.trim()) {
+        throw new BadRequestException('nicNumber is required');
+      }
+
+      if (!identityFrontImage) {
+        throw new BadRequestException('identityFrontImage is required');
+      }
+
+      if (!selfieImage) {
+        throw new BadRequestException('selfieImage is required');
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          role: true,
+        },
+      });
+
+      if (!user) {
+        throw new BadRequestException('User not found');
+      }
+
+      if (user.role !== UserRole.PARTICIPANT && user.role !== UserRole.BOTH) {
+        throw new ForbiddenException(
+          'Only participants can submit NIC verification',
+        );
+      }
+
+      const nicHash = this.hashNic(dto.nicNumber);
+
+      const existingNicUser = await this.prisma.user.findFirst({
+        where: {
+          nicHash,
+          id: {
+            not: user.id,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (existingNicUser) {
+        throw new ConflictException('This NIC is already registered');
+      }
+
+      const [identityFrontImageUrl, selfieImageUrl] = await Promise.all([
+        this.storageService.uploadImage(
+          identityFrontImage,
+          `users/${user.id}/verification/nic`,
+        ),
+        this.storageService.uploadImage(
+          selfieImage,
+          `users/${user.id}/verification/selfie`,
+        ),
+      ]);
+
+      const updatedUser = await this.prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          nicHash,
+          nicImagePath: identityFrontImageUrl,
+          selfiePath: selfieImageUrl,
+          isIdentityVerified: false,
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          role: true,
+          nicImagePath: true,
+          selfiePath: true,
+          isIdentityVerified: true,
+          updatedAt: true,
+        },
+      });
+
+      const verificationJob =
+        await this.identityVerificationQueue.enqueueVerification({
+          userId: user.id,
+          nicNumber: dto.nicNumber.trim(),
+          documentImageUrl: identityFrontImageUrl,
+          selfieImageUrl,
+        });
+
+      return {
+        message:
+          'NIC verification details uploaded successfully and queued for verification',
+        user: updatedUser,
+        verification: {
+          nicNumberProvided: true,
+          identityFrontImageUploaded: true,
+          selfieImageUploaded: true,
+          queueJobId: verificationJob.id,
+          queueStatus: 'QUEUED',
+        },
+      };
+    } catch (error) {
+      console.log('verifyNic error:', error);
+      throw error;
+    }
+  }
+
   async updateProfilePhoto(
     participantId: string,
     profilePhoto?: Express.Multer.File,
@@ -436,6 +569,7 @@ export class ParticipantService {
         role: true,
         nicImagePath: true,
         selfiePath: true,
+        isIdentityVerified: true,
         participantAge: true,
         participantGender: true,
         participantCity: true,
@@ -467,9 +601,7 @@ export class ParticipantService {
       );
     }
 
-    const isVerified = Boolean(
-      participant.nicImagePath && participant.selfiePath,
-    );
+    const isVerified = participant.isIdentityVerified;
 
     const [
       completedSurveysCount,
@@ -619,7 +751,7 @@ export class ParticipantService {
     const verificationProgress = this.getVerificationProgress({
       hasNicOrDrivingLicense: Boolean(participant.nicImagePath),
       hasSelfie: Boolean(participant.selfiePath),
-      isVerified,
+      isVerified: participant.isIdentityVerified,
     });
 
     const earningsThisWeek = this.buildWeeklyEarnings(weeklyCompletedResponses);
@@ -1728,6 +1860,7 @@ export class ParticipantService {
         role: true,
         nicImagePath: true,
         selfiePath: true,
+        isIdentityVerified: true,
         participantAge: true,
         participantGender: true,
         participantCity: true,
@@ -1754,12 +1887,24 @@ export class ParticipantService {
   }
 
   private isParticipantVerified(
-    participant: Pick<
-      ParticipantSurveyAccessContext,
-      'nicImagePath' | 'selfiePath'
-    >,
+    participant: Pick<ParticipantSurveyAccessContext, 'isIdentityVerified'>,
   ) {
-    return Boolean(participant.nicImagePath && participant.selfiePath);
+    return participant.isIdentityVerified;
+  }
+
+  private hashNic(nicNumber: string): string {
+    const secret = process.env.NIC_HASH_SECRET;
+
+    if (!secret) {
+      throw new Error('NIC_HASH_SECRET is missing in .env file');
+    }
+
+    const normalizedNic = nicNumber.trim().toUpperCase();
+
+    return crypto
+      .createHmac('sha256', secret)
+      .update(normalizedNic)
+      .digest('hex');
   }
 
   private matchesTargetAudience(
