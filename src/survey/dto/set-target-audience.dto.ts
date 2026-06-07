@@ -15,10 +15,6 @@ import {
 } from '../../generated/prisma/enums';
 
 export class SetTargetAudienceDto {
-  @IsString()
-  @IsNotEmpty()
-  creatorId: string;
-
   @IsInt()
   @Min(13)
   @Max(100)

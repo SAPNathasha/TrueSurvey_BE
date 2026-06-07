@@ -20,17 +20,18 @@ export class CreatorController {
   constructor(private readonly creatorService: CreatorService) {}
 
   @Get('dashboard')
-  getDashboard(@Query('creatorId') creatorId: string) {
+  @UseGuards(JwtAuthGuard)
+  getDashboard(@User('sub') creatorId: string) {
     return this.creatorService.getDashboard(creatorId);
   }
 
   @Get('surveys')
-  getSurveys(@Query() query: GetSurveysQueryDto) {
-    return this.creatorService.getSurveys(
-      query.creatorId,
-      query.status,
-      query.limit,
-    );
+  @UseGuards(JwtAuthGuard)
+  getSurveys(
+    @User('sub') creatorId: string,
+    @Query() query: GetSurveysQueryDto,
+  ) {
+    return this.creatorService.getSurveys(creatorId, query.status, query.limit);
   }
 
   @Get('survey-submissions')

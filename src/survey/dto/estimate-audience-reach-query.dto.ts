@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -16,10 +15,6 @@ import {
 } from '../../generated/prisma/enums';
 
 export class EstimateAudienceReachQueryDto {
-  @IsString()
-  @IsNotEmpty()
-  userId: string;
-
   @Type(() => Number)
   @IsInt()
   @Min(13)

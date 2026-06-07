@@ -22,10 +22,6 @@ export class UpdateManualQuestionOptionDto {
 
 export class UpdateManualQuestionDto {
   @IsString()
-  @IsNotEmpty()
-  creatorId: string;
-
-  @IsString()
   @IsOptional()
   @MaxLength(500)
   questionText?: string;

@@ -23,10 +23,6 @@ export class ManualQuestionOptionDto {
 export class CreateManualQuestionDto {
   @IsString()
   @IsNotEmpty()
-  creatorId: string;
-
-  @IsString()
-  @IsNotEmpty()
   @MaxLength(500)
   questionText: string;
 

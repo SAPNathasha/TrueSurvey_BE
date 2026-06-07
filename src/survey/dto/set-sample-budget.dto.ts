@@ -17,10 +17,6 @@ import {
 } from '../../generated/prisma/enums';
 
 export class SetSampleBudgetDto {
-  @IsString()
-  @IsNotEmpty()
-  creatorId: string;
-
   @Type(() => Number)
   @IsInt()
   @Min(1)

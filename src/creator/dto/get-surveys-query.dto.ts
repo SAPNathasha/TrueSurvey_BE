@@ -1,19 +1,7 @@
 import { Type } from 'class-transformer';
-import {
-  IsIn,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class GetSurveysQueryDto {
-  @IsNotEmpty()
-  @IsString()
-  creatorId: string;
-
   @IsOptional()
   @IsIn(['ACTIVE', 'DRAFT', 'CLOSED'])
   status?: 'ACTIVE' | 'DRAFT' | 'CLOSED';

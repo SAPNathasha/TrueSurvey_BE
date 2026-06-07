@@ -15,7 +15,6 @@ import { CreateSurveyBasicDetailsRequestDto } from './dto/create-survey-basic-de
 import { SelectSurveyMethodDto } from './dto/select-survey-method.dto';
 import { CreateManualQuestionDto } from './dto/create-manual-question.dto';
 import { UpdateManualQuestionDto } from './dto/update-manual-question.dto';
-import { CreatorIdDto } from './dto/creator-id.dto';
 import { SetTargetAudienceDto } from './dto/set-target-audience.dto';
 import { SetSampleBudgetDto } from './dto/set-sample-budget.dto';
 import { PublishSurveyDto } from './dto/publish-survey.dto';
@@ -32,36 +31,44 @@ export class SurveyController {
   constructor(private readonly surveyService: SurveyService) {}
 
   @Post('basic-details')
-  createBasicDetails(@Body() body: CreateSurveyBasicDetailsRequestDto) {
-    return this.surveyService.createBasicDetails(body.creatorId, body);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
+  createBasicDetails(
+    @User('sub') creatorId: string,
+    @Body() body: CreateSurveyBasicDetailsRequestDto,
+  ) {
+    return this.surveyService.createBasicDetails(creatorId, body);
   }
 
   @Patch(':surveyId/method')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   selectMethod(
     @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
     @Body() body: SelectSurveyMethodDto,
   ) {
     return this.surveyService.selectMethod(
-      body.creatorId,
+      creatorId,
       surveyId,
       body.creationMethod,
     );
   }
 
   @Post(':surveyId/questions/manual')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   createManualQuestion(
     @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
     @Body() body: CreateManualQuestionDto,
   ) {
-    return this.surveyService.createManualQuestion(
-      body.creatorId,
-      surveyId,
-      body,
-    );
+    return this.surveyService.createManualQuestion(creatorId, surveyId, body);
   }
 
   @Post(':surveyId/questions/ai')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   generateAiQuestions(
     @Param('surveyId') surveyId: string,
     @User('sub') creatorId: string,
@@ -71,9 +78,11 @@ export class SurveyController {
   }
 
   @Get(':surveyId/questions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   getSurveyQuestions(
     @Param('surveyId') surveyId: string,
-    @Query('creatorId') creatorId: string,
+    @User('sub') creatorId: string,
   ) {
     return this.surveyService.getSurveyQuestions(creatorId, surveyId);
   }
@@ -89,21 +98,26 @@ export class SurveyController {
   }
 
   @Patch(':surveyId/questions/complete')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   completeQuestionStep(
     @Param('surveyId') surveyId: string,
-    @Body() body: CreatorIdDto,
+    @User('sub') creatorId: string,
   ) {
-    return this.surveyService.completeQuestionStep(body.creatorId, surveyId);
+    return this.surveyService.completeQuestionStep(creatorId, surveyId);
   }
 
   @Patch(':surveyId/questions/:questionId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   updateManualQuestion(
     @Param('surveyId') surveyId: string,
     @Param('questionId') questionId: string,
+    @User('sub') creatorId: string,
     @Body() body: UpdateManualQuestionDto,
   ) {
     return this.surveyService.updateManualQuestion(
-      body.creatorId,
+      creatorId,
       surveyId,
       questionId,
       body,
@@ -111,53 +125,65 @@ export class SurveyController {
   }
 
   @Delete(':surveyId/questions/:questionId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   deleteQuestion(
     @Param('surveyId') surveyId: string,
     @Param('questionId') questionId: string,
-    @Body() body: CreatorIdDto,
+    @User('sub') creatorId: string,
   ) {
-    return this.surveyService.deleteQuestion(
-      body.creatorId,
-      surveyId,
-      questionId,
-    );
+    return this.surveyService.deleteQuestion(creatorId, surveyId, questionId);
   }
   @Patch(':surveyId/target-audience')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   setTargetAudience(
     @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
     @Body() body: SetTargetAudienceDto,
   ) {
-    return this.surveyService.setTargetAudience(body.creatorId, surveyId, body);
+    return this.surveyService.setTargetAudience(creatorId, surveyId, body);
   }
   @Patch(':surveyId/sample-budget')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   setSampleBudget(
     @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
     @Body() body: SetSampleBudgetDto,
   ) {
-    return this.surveyService.setSampleBudget(body.creatorId, surveyId, body);
+    return this.surveyService.setSampleBudget(creatorId, surveyId, body);
   }
 
   @Get(':surveyId/estimated-reach')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   getEstimatedReach(
     @Param('surveyId') surveyId: string,
+    @User('sub') userId: string,
     @Query() query: EstimateAudienceReachQueryDto,
   ) {
-    return this.surveyService.getEstimatedReach(query.userId, surveyId, query);
+    return this.surveyService.getEstimatedReach(userId, surveyId, query);
   }
 
   @Get(':surveyId/preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   getSurveyPreview(
     @Param('surveyId') surveyId: string,
-    @Query('creatorId') creatorId: string,
+    @User('sub') creatorId: string,
   ) {
     return this.surveyService.getSurveyPreview(creatorId, surveyId);
   }
 
   @Patch(':surveyId/publish')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.BOTH)
   publishSurvey(
     @Param('surveyId') surveyId: string,
+    @User('sub') creatorId: string,
     @Body() body: PublishSurveyDto,
   ) {
-    return this.surveyService.publishSurvey(body.creatorId, surveyId, body);
+    return this.surveyService.publishSurvey(creatorId, surveyId, body);
   }
 }
