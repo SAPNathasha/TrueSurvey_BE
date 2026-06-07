@@ -14,7 +14,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { StorageService } from './storage/storage.service';
 import { MailService } from './mail/mail.service';
-import { UserRole } from '../generated/prisma/enums';
+import { IdVerificationStatus, UserRole } from '../generated/prisma/enums';
 import { TokenPayload } from './types/token-payload.type';
 import { IdentityVerificationQueue } from '../participant/identity-verification.queue';
 
@@ -161,6 +161,11 @@ export class AuthService {
         nicHash,
         nicImagePath: nicImageUrl,
         selfiePath: selfieImageUrl,
+        idVerificationStatus:
+          nicNumber?.trim() && nicImageUrl && selfieImageUrl
+            ? IdVerificationStatus.PENDING
+            : IdVerificationStatus.NOT_TRIED,
+        isIdentityVerified: false,
       },
       select: {
         id: true,
@@ -198,6 +203,16 @@ export class AuthService {
         };
       } catch (error) {
         console.log('register identity verification queue error:', error);
+
+        await this.prisma.user.update({
+          where: {
+            id: user.id,
+          },
+          data: {
+            idVerificationStatus: IdVerificationStatus.NOT_TRIED,
+            isIdentityVerified: false,
+          },
+        });
 
         verification = {
           nicNumberProvided: true,

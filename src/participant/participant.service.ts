@@ -19,6 +19,7 @@ import { IdentityVerificationQueue } from './identity-verification.queue';
 
 import {
   AudienceGender,
+  IdVerificationStatus,
   RewardStatus,
   SurveyAudienceType,
   SurveyBudgetCurrency,
@@ -214,6 +215,7 @@ export class ParticipantService {
 
         profileImagePath: true,
         isEmailVerified: true,
+        idVerificationStatus: true,
         isIdentityVerified: true,
 
         nicImagePath: true,
@@ -271,6 +273,7 @@ export class ParticipantService {
         memberSince: participant.createdAt,
         accountStatus: 'ACTIVE',
         emailVerified: participant.isEmailVerified,
+        idVerificationStatus: participant.idVerificationStatus,
         verificationStatus: participant.isIdentityVerified
           ? 'VERIFIED'
           : 'NOT_VERIFIED',
@@ -442,6 +445,7 @@ export class ParticipantService {
           nicHash,
           nicImagePath: identityFrontImageUrl,
           selfiePath: selfieImageUrl,
+          idVerificationStatus: IdVerificationStatus.PENDING,
           isIdentityVerified: false,
         },
         select: {
@@ -478,6 +482,23 @@ export class ParticipantService {
       };
     } catch (error) {
       console.log('verifyNic error:', error);
+
+      if (userId) {
+        try {
+          await this.prisma.user.update({
+            where: {
+              id: userId,
+            },
+            data: {
+              idVerificationStatus: IdVerificationStatus.NOT_TRIED,
+              isIdentityVerified: false,
+            },
+          });
+        } catch (updateError) {
+          console.log('verifyNic rollback error:', updateError);
+        }
+      }
+
       throw error;
     }
   }

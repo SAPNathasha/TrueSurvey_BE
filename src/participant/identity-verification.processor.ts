@@ -3,6 +3,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 
 import { PrismaService } from '../auth/prisma/prisma.service';
+import { IdVerificationStatus } from '../generated/prisma/enums';
 import {
   IDENTITY_VERIFICATION_JOB,
   IDENTITY_VERIFICATION_QUEUE,
@@ -47,12 +48,15 @@ export class IdentityVerificationProcessor extends WorkerHost {
           id: job.data.userId,
         },
         data: {
+          idVerificationStatus: isVerified
+            ? IdVerificationStatus.ACCEPTED
+            : IdVerificationStatus.REJECTED,
           isIdentityVerified: isVerified,
         },
       });
 
       this.logger.log(
-        `Updated isIdentityVerified=${isVerified} for user ${job.data.userId}`,
+        `Updated verification status for user ${job.data.userId}: isIdentityVerified=${isVerified}`,
       );
 
       return verificationResponse;

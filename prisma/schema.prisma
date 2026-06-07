@@ -137,6 +137,13 @@ enum WalletTransactionStatus {
   FAILED
 }
 
+enum IdVerificationStatus {
+  NOT_TRIED
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
 model User {
   id       String   @id @default(uuid())
   username String   @default("existing_user")
@@ -153,6 +160,7 @@ model User {
   nicHash      String? @unique
   nicImagePath String?
   selfiePath   String?
+  idVerificationStatus IdVerificationStatus @default(NOT_TRIED)
   isIdentityVerified Boolean @default(false)
 
   profileImagePath String?
