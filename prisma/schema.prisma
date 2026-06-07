@@ -191,6 +191,58 @@ model User {
   updatedAt DateTime @updatedAt
 }
 
+model Province {
+  id           String     @id @default(uuid())
+  name         String     @unique
+  code         String     @unique
+  displayOrder Int
+  isActive     Boolean    @default(true)
+  districts    District[]
+  surveyTargetAudiences SurveyTargetAudience[] @relation("SurveyTargetAudienceProvince")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([displayOrder])
+  @@index([isActive])
+}
+
+model District {
+  id           String   @id @default(uuid())
+  name         String
+  code         String   @unique
+  displayOrder Int
+  isActive     Boolean  @default(true)
+  provinceId   String
+  province     Province @relation(fields: [provinceId], references: [id], onDelete: Restrict)
+  cities       City[]
+  surveyTargetAudiences SurveyTargetAudience[] @relation("SurveyTargetAudienceDistrict")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([provinceId, name])
+  @@index([provinceId])
+  @@index([displayOrder])
+  @@index([isActive])
+}
+
+model City {
+  id           String   @id @default(uuid())
+  name         String
+  code         String   @unique
+  displayOrder Int
+  isActive     Boolean  @default(true)
+  districtId   String
+  district     District @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  surveyTargetAudiences SurveyTargetAudience[] @relation("SurveyTargetAudienceCity")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([districtId, name])
+  @@index([districtId])
+  @@index([displayOrder])
+  @@index([isActive])
+}
+
 model RefreshToken {
   id        String   @id @default(uuid())
   tokenHash String
@@ -315,8 +367,12 @@ model SurveyTargetAudience {
 
   gender AudienceGender @default(ALL)
 
+  province String?
   city     String?
   district String?
+  provinceDetails Province? @relation("SurveyTargetAudienceProvince", fields: [province], references: [id], onDelete: SetNull)
+  cityDetails     City?     @relation("SurveyTargetAudienceCity", fields: [city], references: [id], onDelete: SetNull)
+  districtDetails District? @relation("SurveyTargetAudienceDistrict", fields: [district], references: [id], onDelete: SetNull)
 
   educationLevel String?
   occupation     String?
@@ -327,6 +383,7 @@ model SurveyTargetAudience {
   updatedAt DateTime @updatedAt
 
   @@index([sampleBase])
+  @@index([province])
   @@index([city])
   @@index([district])
 }

@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -33,14 +34,16 @@ export class EstimateAudienceReachQueryDto {
   @IsOptional()
   gender?: AudienceGender;
 
-  @IsString()
+  @IsUUID()
   @IsOptional()
-  @MaxLength(100)
+  province?: string;
+
+  @IsUUID()
+  @IsOptional()
   city?: string;
 
-  @IsString()
+  @IsUUID()
   @IsOptional()
-  @MaxLength(100)
   district?: string;
 
   @IsString()

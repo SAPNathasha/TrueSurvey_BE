@@ -672,6 +672,8 @@ export class SurveyService {
       );
     }
 
+    const locationSelection = await this.resolveTargetAudienceLocations(dto);
+
     const targetAudience = await this.prisma.surveyTargetAudience.upsert({
       where: {
         surveyId,
@@ -681,8 +683,9 @@ export class SurveyService {
         minimumAge: dto.minimumAge,
         maximumAge: dto.maximumAge,
         gender: dto.gender ?? AudienceGender.ALL,
-        city: dto.city,
-        district: dto.district,
+        province: locationSelection.provinceId,
+        city: locationSelection.cityId,
+        district: locationSelection.districtId,
         educationLevel: dto.educationLevel,
         occupation: dto.occupation,
         sampleBase: dto.sampleBase,
@@ -691,8 +694,9 @@ export class SurveyService {
         minimumAge: dto.minimumAge,
         maximumAge: dto.maximumAge,
         gender: dto.gender ?? AudienceGender.ALL,
-        city: dto.city,
-        district: dto.district,
+        province: locationSelection.provinceId,
+        city: locationSelection.cityId,
+        district: locationSelection.districtId,
         educationLevel: dto.educationLevel,
         occupation: dto.occupation,
         sampleBase: dto.sampleBase,
@@ -702,8 +706,32 @@ export class SurveyService {
         minimumAge: true,
         maximumAge: true,
         gender: true,
+        province: true,
         city: true,
         district: true,
+        provinceDetails: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
+        cityDetails: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            districtId: true,
+          },
+        },
+        districtDetails: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            provinceId: true,
+          },
+        },
         educationLevel: true,
         occupation: true,
         sampleBase: true,
@@ -892,7 +920,11 @@ export class SurveyService {
 
     await this.validateSurveyCreatorAccess(userId, surveyId);
 
-    const estimatedReach = await this.estimateAudienceReach(query);
+    const locationSelection = await this.resolveTargetAudienceLocations(query);
+    const estimatedReach = await this.estimateAudienceReach(
+      query,
+      locationSelection,
+    );
 
     return {
       surveyId,
@@ -901,8 +933,18 @@ export class SurveyService {
         minimumAge: query.minimumAge ?? null,
         maximumAge: query.maximumAge ?? null,
         gender: query.gender ?? AudienceGender.ALL,
-        city: query.city ?? null,
-        district: query.district ?? null,
+        province: locationSelection.provinceId,
+        city: locationSelection.cityId,
+        district: locationSelection.districtId,
+        provinceDetails: locationSelection.province
+          ? {
+              id: locationSelection.province.id,
+              name: locationSelection.province.name,
+              code: locationSelection.province.code,
+            }
+          : null,
+        cityDetails: locationSelection.city,
+        districtDetails: locationSelection.district,
         educationLevel: query.educationLevel ?? null,
         occupation: query.occupation ?? null,
         sampleBase: query.sampleBase,
@@ -964,8 +1006,32 @@ export class SurveyService {
             minimumAge: true,
             maximumAge: true,
             gender: true,
+            province: true,
             city: true,
             district: true,
+            provinceDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+            cityDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                districtId: true,
+              },
+            },
+            districtDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                provinceId: true,
+              },
+            },
             educationLevel: true,
             occupation: true,
             sampleBase: true,
@@ -1343,6 +1409,7 @@ export class SurveyService {
   private async estimateAudienceReach(
     dto: Pick<
       EstimateAudienceReachQueryDto,
+      | 'province'
       | 'minimumAge'
       | 'maximumAge'
       | 'gender'
@@ -1352,6 +1419,26 @@ export class SurveyService {
       | 'occupation'
       | 'sampleBase'
     >,
+    locationSelection: {
+      province: {
+        id: string;
+        name: string;
+        code: string;
+      } | null;
+      district: {
+        id: string;
+        name: string;
+        code: string;
+        provinceId: string;
+      } | null;
+      city: {
+        id: string;
+        name: string;
+        code: string;
+        districtId: string;
+      } | null;
+      provinceDistrictNames: string[];
+    },
   ): Promise<number> {
     return this.prisma.user.count({
       where: {
@@ -1385,20 +1472,34 @@ export class SurveyService {
               participantGender: dto.gender,
             }
           : {}),
-        ...(dto.city
+        ...(locationSelection.city
           ? {
               participantCity: {
-                equals: dto.city,
+                equals: locationSelection.city.name,
                 mode: 'insensitive' as const,
               },
             }
           : {}),
-        ...(dto.district
+        ...(locationSelection.district
           ? {
               participantDistrict: {
-                equals: dto.district,
+                equals: locationSelection.district.name,
                 mode: 'insensitive' as const,
               },
+            }
+          : {}),
+        ...(locationSelection.province &&
+        !locationSelection.district &&
+        locationSelection.provinceDistrictNames.length > 0
+          ? {
+              OR: locationSelection.provinceDistrictNames.map(
+                (districtName) => ({
+                  participantDistrict: {
+                    equals: districtName,
+                    mode: 'insensitive' as const,
+                  },
+                }),
+              ),
             }
           : {}),
         ...(dto.educationLevel
@@ -1419,6 +1520,123 @@ export class SurveyService {
           : {}),
       },
     });
+  }
+
+  private async resolveTargetAudienceLocations(params: {
+    province?: string;
+    district?: string;
+    city?: string;
+  }) {
+    const [province, district, city] = await Promise.all([
+      params.province
+        ? this.prisma.province.findUnique({
+            where: {
+              id: params.province,
+            },
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              districts: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve(null),
+      params.district
+        ? this.prisma.district.findUnique({
+            where: {
+              id: params.district,
+            },
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              provinceId: true,
+            },
+          })
+        : Promise.resolve(null),
+      params.city
+        ? this.prisma.city.findUnique({
+            where: {
+              id: params.city,
+            },
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              districtId: true,
+              district: {
+                select: {
+                  provinceId: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (params.province && !province) {
+      throw new BadRequestException('Province not found');
+    }
+
+    if (params.district && !district) {
+      throw new BadRequestException('District not found');
+    }
+
+    if (params.city && !city) {
+      throw new BadRequestException('City not found');
+    }
+
+    if (province && district && district.provinceId !== province.id) {
+      throw new BadRequestException(
+        'District does not belong to the selected province',
+      );
+    }
+
+    if (district && city && city.districtId !== district.id) {
+      throw new BadRequestException(
+        'City does not belong to the selected district',
+      );
+    }
+
+    if (province && city && city.district.provinceId !== province.id) {
+      throw new BadRequestException(
+        'City does not belong to the selected province',
+      );
+    }
+
+    return {
+      provinceId: province?.id ?? null,
+      districtId: district?.id ?? null,
+      cityId: city?.id ?? null,
+      province: province
+        ? {
+            id: province.id,
+            name: province.name,
+            code: province.code,
+          }
+        : null,
+      district: district
+        ? {
+            id: district.id,
+            name: district.name,
+            code: district.code,
+            provinceId: district.provinceId,
+          }
+        : null,
+      city: city
+        ? {
+            id: city.id,
+            name: city.name,
+            code: city.code,
+            districtId: city.districtId,
+          }
+        : null,
+      provinceDistrictNames: province?.districts.map((item) => item.name) ?? [],
+    };
   }
 
   private async requestAiQuestions(

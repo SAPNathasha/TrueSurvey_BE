@@ -69,8 +69,28 @@ type DashboardActiveSurvey = {
     minimumAge: number | null;
     maximumAge: number | null;
     gender: AudienceGender;
+    provinceDetails: {
+      id: string;
+      name: string;
+      code: string;
+      districts: {
+        name: string;
+      }[];
+    } | null;
     city: string | null;
     district: string | null;
+    cityDetails: {
+      id: string;
+      name: string;
+      code: string;
+      districtId: string;
+    } | null;
+    districtDetails: {
+      id: string;
+      name: string;
+      code: string;
+      provinceId: string;
+    } | null;
     educationLevel: string | null;
     occupation: string | null;
     sampleBase: SurveyAudienceType;
@@ -168,8 +188,28 @@ type ParticipantAccessibleSurvey = {
     minimumAge: number | null;
     maximumAge: number | null;
     gender: AudienceGender;
+    provinceDetails: {
+      id: string;
+      name: string;
+      code: string;
+      districts: {
+        name: string;
+      }[];
+    } | null;
     city: string | null;
     district: string | null;
+    cityDetails: {
+      id: string;
+      name: string;
+      code: string;
+      districtId: string;
+    } | null;
+    districtDetails: {
+      id: string;
+      name: string;
+      code: string;
+      provinceId: string;
+    } | null;
     educationLevel: string | null;
     occupation: string | null;
     sampleBase: SurveyAudienceType;
@@ -713,6 +753,34 @@ export class ParticipantService {
               minimumAge: true,
               maximumAge: true,
               gender: true,
+              provinceDetails: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                  districts: {
+                    select: {
+                      name: true,
+                    },
+                  },
+                },
+              },
+              cityDetails: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                  districtId: true,
+                },
+              },
+              districtDetails: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                  provinceId: true,
+                },
+              },
               city: true,
               district: true,
               educationLevel: true,
@@ -882,6 +950,34 @@ export class ParticipantService {
             minimumAge: true,
             maximumAge: true,
             gender: true,
+            provinceDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                districts: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+            },
+            cityDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                districtId: true,
+              },
+            },
+            districtDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                provinceId: true,
+              },
+            },
             city: true,
             district: true,
             educationLevel: true,
@@ -1910,6 +2006,34 @@ export class ParticipantService {
             minimumAge: true,
             maximumAge: true,
             gender: true,
+            provinceDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                districts: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+            },
+            cityDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                districtId: true,
+              },
+            },
+            districtDetails: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                provinceId: true,
+              },
+            },
             city: true,
             district: true,
             educationLevel: true,
@@ -2240,8 +2364,28 @@ export class ParticipantService {
       minimumAge: number | null;
       maximumAge: number | null;
       gender: AudienceGender;
+      provinceDetails: {
+        id: string;
+        name: string;
+        code: string;
+        districts: {
+          name: string;
+        }[];
+      } | null;
       city: string | null;
       district: string | null;
+      cityDetails: {
+        id: string;
+        name: string;
+        code: string;
+        districtId: string;
+      } | null;
+      districtDetails: {
+        id: string;
+        name: string;
+        code: string;
+        provinceId: string;
+      } | null;
       educationLevel: string | null;
       occupation: string | null;
     } | null,
@@ -2275,21 +2419,37 @@ export class ParticipantService {
     }
 
     if (
-      targetAudience.city &&
+      targetAudience.cityDetails &&
       participant.participantCity &&
       participant.participantCity.toLowerCase() !==
-        targetAudience.city.toLowerCase()
+        targetAudience.cityDetails.name.toLowerCase()
     ) {
       return false;
     }
 
     if (
-      targetAudience.district &&
+      targetAudience.districtDetails &&
       participant.participantDistrict &&
       participant.participantDistrict.toLowerCase() !==
-        targetAudience.district.toLowerCase()
+        targetAudience.districtDetails.name.toLowerCase()
     ) {
       return false;
+    }
+
+    if (
+      targetAudience.provinceDetails &&
+      !targetAudience.districtDetails &&
+      participant.participantDistrict
+    ) {
+      const districtNames = targetAudience.provinceDetails.districts.map(
+        (district) => district.name.toLowerCase(),
+      );
+
+      if (
+        !districtNames.includes(participant.participantDistrict.toLowerCase())
+      ) {
+        return false;
+      }
     }
 
     if (
