@@ -38,10 +38,6 @@ export class SubmitSurveyAnswerDto {
 }
 
 export class SubmitSurveyDto {
-  @IsString()
-  @IsNotEmpty()
-  participantId: string;
-
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

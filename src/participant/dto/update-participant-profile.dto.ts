@@ -15,10 +15,6 @@ import { AudienceGender } from '../../generated/prisma/enums';
 
 export class UpdateParticipantProfileDto {
   @IsString()
-  @IsNotEmpty()
-  participantId: string;
-
-  @IsString()
   @IsOptional()
   @MaxLength(100)
   fullName?: string;

@@ -1,19 +1,7 @@
 import { Type } from 'class-transformer';
-import {
-  IsIn,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class ParticipantWalletQueryDto {
-  @IsString()
-  @IsNotEmpty()
-  participantId: string;
-
   @IsString()
   @IsOptional()
   search?: string;

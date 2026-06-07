@@ -282,10 +282,13 @@ export class ParticipantService {
     };
   }
 
-  async updateProfileSettings(dto: UpdateParticipantProfileDto) {
+  async updateProfileSettings(
+    participantId: string,
+    dto: UpdateParticipantProfileDto,
+  ) {
     const participant = await this.prisma.user.findUnique({
       where: {
-        id: dto.participantId,
+        id: participantId,
       },
       select: {
         id: true,
@@ -310,7 +313,7 @@ export class ParticipantService {
 
     const updatedParticipant = await this.prisma.user.update({
       where: {
-        id: dto.participantId,
+        id: participantId,
       },
       data: {
         fullName: dto.fullName,
@@ -811,9 +814,10 @@ export class ParticipantService {
     };
   }
 
-  async getAvailableSurveys(query: AvailableSurveysQueryDto) {
-    const participantId = query.participantId;
-
+  async getAvailableSurveys(
+    query: AvailableSurveysQueryDto,
+    participantId: string,
+  ) {
     if (!participantId) {
       throw new BadRequestException('participantId is required');
     }
@@ -1206,11 +1210,9 @@ export class ParticipantService {
     };
   }
 
-  async getWallet(query: ParticipantWalletQueryDto) {
-    const participantId = query.participantId;
-
-    if (!participantId) {
-      throw new BadRequestException('participantId is required');
+  async getWallet(userId: string, query: ParticipantWalletQueryDto) {
+    if (!userId) {
+      throw new BadRequestException('userId is required');
     }
 
     const page = query.page ?? 1;
@@ -1219,7 +1221,7 @@ export class ParticipantService {
 
     const participant = await this.prisma.user.findUnique({
       where: {
-        id: participantId,
+        id: userId,
       },
       select: {
         id: true,
@@ -1232,13 +1234,13 @@ export class ParticipantService {
       throw new BadRequestException('Participant not found');
     }
 
-    const wallet = await this.getOrCreateWallet(participantId);
+    const wallet = await this.getOrCreateWallet(userId);
 
     const [completedResponses, withdrawalTransactions, allTransactions] =
       await Promise.all([
         this.prisma.surveyResponse.findMany({
           where: {
-            participantId,
+            participantId: userId,
             status: SurveyResponseStatus.COMPLETED,
           },
           orderBy: {
@@ -1261,7 +1263,7 @@ export class ParticipantService {
 
         this.prisma.walletTransaction.findMany({
           where: {
-            userId: participantId,
+            userId,
             type: WalletTransactionType.WITHDRAWAL,
           },
           orderBy: {
@@ -1280,7 +1282,7 @@ export class ParticipantService {
 
         this.prisma.walletTransaction.findMany({
           where: {
-            userId: participantId,
+            userId,
           },
           orderBy: {
             createdAt: 'desc',

@@ -21,7 +21,6 @@ import { memoryStorage } from 'multer';
 import type { Express } from 'express';
 
 import { ParticipantService } from './participant.service';
-import { AvailableSurveyDetailQueryDto } from './dto/available-survey-detail-query.dto';
 import { AvailableSurveysQueryDto } from './dto/available-surveys-query.dto';
 import { ParticipantWalletQueryDto } from './dto/participant-wallet-query.dto';
 import { SubmitSurveyDto } from './dto/submit-survey.dto';
@@ -39,43 +38,52 @@ export class ParticipantController {
   constructor(private readonly participantService: ParticipantService) {}
 
   @Get('dashboard')
-  getDashboard(@Query('participantId') participantId: string) {
+  @UseGuards(JwtAuthGuard)
+  getDashboard(@User('sub') participantId: string) {
     return this.participantService.getDashboard(participantId);
   }
 
   @Get('available-surveys')
-  getAvailableSurveys(@Query() query: AvailableSurveysQueryDto) {
-    return this.participantService.getAvailableSurveys(query);
+  @UseGuards(JwtAuthGuard)
+  getAvailableSurveys(
+    @User('sub') participantId: string,
+    @Query() query: AvailableSurveysQueryDto,
+  ) {
+    return this.participantService.getAvailableSurveys(query, participantId);
   }
 
   @Get('available-surveys/:surveyId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.PARTICIPANT, UserRole.BOTH)
   getAvailableSurveyById(
     @Param('surveyId') surveyId: string,
-    @Query() query: AvailableSurveyDetailQueryDto,
+    @User('sub') participantId: string,
   ) {
     return this.participantService.getAvailableSurveyById(
-      query.participantId,
+      participantId,
       surveyId,
     );
   }
 
   @Post('available-surveys/:surveyId/submit')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.PARTICIPANT, UserRole.BOTH)
   submitSurvey(
     @Param('surveyId') surveyId: string,
+    @User('sub') participantId: string,
     @Body() body: SubmitSurveyDto,
   ) {
-    return this.participantService.submitSurvey(
-      body.participantId,
-      surveyId,
-      body,
-    );
+    return this.participantService.submitSurvey(participantId, surveyId, body);
   }
 
   @Get('wallet')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
-  getWallet(@Query() query: ParticipantWalletQueryDto) {
-    return this.participantService.getWallet(query);
+  getWallet(
+    @User('sub') userId: string,
+    @Query() query: ParticipantWalletQueryDto,
+  ) {
+    return this.participantService.getWallet(userId, query);
   }
 
   @Get('submissions')
@@ -107,13 +115,18 @@ export class ParticipantController {
   @Get('profile-settings')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
-  getProfileSettings(@Query('participantId') participantId: string) {
-    return this.participantService.getProfileSettings(participantId);
+  getProfileSettings(@User('sub') userId: string) {
+    return this.participantService.getProfileSettings(userId);
   }
 
   @Patch('profile-settings')
-  updateProfileSettings(@Body() body: UpdateParticipantProfileDto) {
-    return this.participantService.updateProfileSettings(body);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
+  updateProfileSettings(
+    @User('sub') userId: string,
+    @Body() body: UpdateParticipantProfileDto,
+  ) {
+    return this.participantService.updateProfileSettings(userId, body);
   }
 
   @Post('verify-nic')
@@ -164,6 +177,8 @@ export class ParticipantController {
   }
 
   @Patch('settings/profile-photo')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
   @UseInterceptors(
     FileInterceptor('profilePhoto', {
       storage: memoryStorage(),
@@ -192,12 +207,9 @@ export class ParticipantController {
     }),
   )
   updateProfilePhoto(
-    @Body('participantId') participantId: string,
+    @User('sub') userId: string,
     @UploadedFile() profilePhoto: Express.Multer.File,
   ) {
-    return this.participantService.updateProfilePhoto(
-      participantId,
-      profilePhoto,
-    );
+    return this.participantService.updateProfilePhoto(userId, profilePhoto);
   }
 }
