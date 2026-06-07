@@ -244,15 +244,6 @@ export class ParticipantService {
       throw new BadRequestException('Participant not found');
     }
 
-    if (
-      participant.role !== UserRole.PARTICIPANT &&
-      participant.role !== UserRole.BOTH
-    ) {
-      throw new ForbiddenException(
-        'Only participants can access profile settings',
-      );
-    }
-
     return {
       profile: {
         id: participant.id,
@@ -1218,13 +1209,6 @@ export class ParticipantService {
 
     if (!participant) {
       throw new BadRequestException('Participant not found');
-    }
-
-    if (
-      participant.role !== UserRole.PARTICIPANT &&
-      participant.role !== UserRole.BOTH
-    ) {
-      throw new ForbiddenException('Only participants can access wallet');
     }
 
     const wallet = await this.getOrCreateWallet(participantId);

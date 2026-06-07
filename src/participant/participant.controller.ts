@@ -72,6 +72,8 @@ export class ParticipantController {
   }
 
   @Get('wallet')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
   getWallet(@Query() query: ParticipantWalletQueryDto) {
     return this.participantService.getWallet(query);
   }
@@ -103,6 +105,8 @@ export class ParticipantController {
   }
 
   @Get('profile-settings')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.PARTICIPANT, UserRole.BOTH)
   getProfileSettings(@Query('participantId') participantId: string) {
     return this.participantService.getProfileSettings(participantId);
   }

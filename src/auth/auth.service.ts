@@ -16,6 +16,7 @@ import { StorageService } from './storage/storage.service';
 import { MailService } from './mail/mail.service';
 import { UserRole } from '../generated/prisma/enums';
 import { TokenPayload } from './types/token-payload.type';
+import { IdentityVerificationQueue } from '../participant/identity-verification.queue';
 
 type RegisterResponse = {
   message: string;
@@ -27,6 +28,13 @@ type RegisterResponse = {
     nicImagePath: string | null;
     selfiePath: string | null;
     createdAt: Date;
+  };
+  verification?: {
+    nicNumberProvided: boolean;
+    identityFrontImageUploaded: boolean;
+    selfieImageUploaded: boolean;
+    queueJobId: string | number | null;
+    queueStatus: 'QUEUED' | 'SKIPPED' | 'QUEUE_FAILED';
   };
 };
 
@@ -67,6 +75,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly storageService: StorageService,
     private readonly mailService: MailService,
+    private readonly identityVerificationQueue: IdentityVerificationQueue,
   ) {}
 
   private getEnvValue(name: string, fallback: string): string {
@@ -164,9 +173,54 @@ export class AuthService {
       },
     });
 
+    const shouldQueueIdentityVerification = Boolean(
+      nicNumber?.trim() && nicImageUrl && selfieImageUrl,
+    );
+
+    let verification: RegisterResponse['verification'] | undefined;
+
+    if (shouldQueueIdentityVerification) {
+      try {
+        const verificationJob =
+          await this.identityVerificationQueue.enqueueVerification({
+            userId: user.id,
+            nicNumber: nicNumber!.trim(),
+            documentImageUrl: nicImageUrl!,
+            selfieImageUrl: selfieImageUrl!,
+          });
+
+        verification = {
+          nicNumberProvided: true,
+          identityFrontImageUploaded: true,
+          selfieImageUploaded: true,
+          queueJobId: verificationJob.id ?? null,
+          queueStatus: 'QUEUED',
+        };
+      } catch (error) {
+        console.log('register identity verification queue error:', error);
+
+        verification = {
+          nicNumberProvided: true,
+          identityFrontImageUploaded: true,
+          selfieImageUploaded: true,
+          queueJobId: null,
+          queueStatus: 'QUEUE_FAILED',
+        };
+      }
+    } else if (nicNumber || nicImageUrl || selfieImageUrl) {
+      verification = {
+        nicNumberProvided: Boolean(nicNumber?.trim()),
+        identityFrontImageUploaded: Boolean(nicImageUrl),
+        selfieImageUploaded: Boolean(selfieImageUrl),
+        queueJobId: null,
+        queueStatus: 'SKIPPED',
+      };
+    }
+
     return {
       message: 'Registration successful',
       user,
+      ...(verification ? { verification } : {}),
     };
   }
 
