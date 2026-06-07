@@ -62,6 +62,7 @@ type DashboardActiveSurvey = {
   category: SurveyCategory;
   audience: SurveyAudienceType;
   estimatedCompletionDays: number;
+  surveyClosingTime: number;
   publishedAt: Date | null;
   creatorId: string;
   targetAudience: {
@@ -89,6 +90,7 @@ type AvailableSurveyCard = {
   id: string;
   title: string;
   description: string;
+  surveyClostingTime: number;
   category: SurveyCategory;
   estimatedTime: string;
   estimatedCompletionDays: number;
@@ -143,6 +145,7 @@ type ParticipantAccessibleSurvey = {
   id: string;
   title: string;
   description: string;
+  surveyClosingTime: number;
   category: SurveyCategory;
   audience: SurveyAudienceType;
   status: SurveyStatus;
@@ -702,6 +705,7 @@ export class ParticipantService {
           category: true,
           audience: true,
           estimatedCompletionDays: true,
+          surveyClosingTime: true,
           publishedAt: true,
           creatorId: true,
           targetAudience: {
@@ -860,10 +864,12 @@ export class ParticipantService {
         id: true,
         title: true,
         description: true,
+        surveyClosingTime: true,
         category: true,
         audience: true,
         estimatedCompletionDays: true,
         publishedAt: true,
+        creatorId: true,
 
         questions: {
           select: {
@@ -905,6 +911,10 @@ export class ParticipantService {
     const lockedSurveys: LockedSurveyCard[] = [];
 
     for (const survey of activeSurveys) {
+      if (survey.creatorId === participant.id) {
+        continue;
+      }
+
       const alreadyStartedOrCompleted = survey.responses.some(
         (response) => response.participantId === participantId,
       );
@@ -957,6 +967,7 @@ export class ParticipantService {
         id: survey.id,
         title: survey.title,
         description: survey.description,
+        surveyClostingTime: survey.surveyClosingTime,
         category: survey.category,
         estimatedTime: `${survey.estimatedCompletionDays} min`,
         estimatedCompletionDays: survey.estimatedCompletionDays,
@@ -1064,6 +1075,7 @@ export class ParticipantService {
         id: survey.id,
         title: survey.title,
         description: survey.description,
+        surveyClostingTime: survey.surveyClosingTime,
         category: survey.category,
         audience: survey.audience,
         estimatedTime: `${survey.estimatedCompletionDays} min`,
@@ -1750,6 +1762,7 @@ export class ParticipantService {
       id: string;
       title: string;
       description: string;
+      surveyClostingTime: number;
       category: SurveyCategory;
       estimatedTime: string;
       rewardAmount: number;
@@ -1762,6 +1775,7 @@ export class ParticipantService {
       id: string;
       title: string;
       description: string;
+      surveyClostingTime: number;
       category: SurveyCategory;
       estimatedTime: string;
       rewardAmount: number;
@@ -1806,6 +1820,7 @@ export class ParticipantService {
         id: survey.id,
         title: survey.title,
         description: survey.description,
+        surveyClostingTime: survey.surveyClosingTime,
         category: survey.category,
         estimatedTime: `${survey.estimatedCompletionDays} min`,
         rewardAmount: this.toNumber(survey.sampleBudget?.rewardPerParticipant),
@@ -1860,11 +1875,13 @@ export class ParticipantService {
         id: true,
         title: true,
         description: true,
+        surveyClosingTime: true,
         category: true,
         audience: true,
         status: true,
         estimatedCompletionDays: true,
         publishedAt: true,
+        creatorId: true,
         questions: {
           orderBy: {
             order: 'asc',
@@ -1921,6 +1938,12 @@ export class ParticipantService {
 
     if (!survey || survey.status !== SurveyStatus.ACTIVE) {
       throw new BadRequestException('Survey not found');
+    }
+
+    if (survey.creatorId === participant.id) {
+      throw new ForbiddenException(
+        'You cannot view or submit responses for your own survey',
+      );
     }
 
     const alreadyStartedOrCompleted = survey.responses.some(

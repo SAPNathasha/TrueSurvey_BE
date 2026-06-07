@@ -27,4 +27,8 @@ export class CreateSurveyBasicDetailsDto {
   @Min(1)
   @Max(365)
   estimatedCompletionDays: number;
+
+  @IsInt()
+  @Min(1)
+  surveyClosingTime: number;
 }

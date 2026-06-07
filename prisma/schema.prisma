@@ -225,6 +225,7 @@ model Survey {
   status SurveyStatus @default(DRAFT)
 
   estimatedCompletionDays Int
+  surveyClosingTime      Int @default(0)
 
   currentStep SurveyCreationStep @default(BASIC_DETAILS)
 

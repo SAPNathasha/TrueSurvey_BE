@@ -1,0 +1,2 @@
+ALTER TABLE "Survey"
+ADD COLUMN "surveyClosingTime" INTEGER NOT NULL DEFAULT 0;

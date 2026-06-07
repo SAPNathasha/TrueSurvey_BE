@@ -90,6 +90,7 @@ export class SurveyService {
         description: dto.description,
         category: dto.category,
         estimatedCompletionDays: dto.estimatedCompletionDays,
+        surveyClosingTime: dto.surveyClosingTime,
         status: SurveyStatus.DRAFT,
         currentStep: SurveyCreationStep.SELECT_METHOD,
         creatorId,
@@ -102,6 +103,7 @@ export class SurveyService {
         category: true,
         audience: true,
         estimatedCompletionDays: true,
+        surveyClosingTime: true,
         status: true,
         currentStep: true,
         creationMethod: true,
@@ -142,6 +144,7 @@ export class SurveyService {
         category: true,
         audience: true,
         estimatedCompletionDays: true,
+        surveyClosingTime: true,
         status: true,
         currentStep: true,
         creationMethod: true,
@@ -1197,7 +1200,10 @@ export class SurveyService {
       throw new BadRequestException('Only draft surveys can be edited');
     }
 
-    if (expectedMethod && survey.creationMethod !== expectedMethod) {
+    if (
+      expectedMethod === SurveyCreationMethod.AI_ASSISTED &&
+      survey.creationMethod !== expectedMethod
+    ) {
       throw new BadRequestException(
         `This survey is not configured for ${expectedMethod} question creation`,
       );
