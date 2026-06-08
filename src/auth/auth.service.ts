@@ -25,9 +25,14 @@ type RegisterResponse = {
     username: string;
     email: string;
     role: UserRole;
+    isEmailVerified: boolean;
     nicImagePath: string | null;
     selfiePath: string | null;
     createdAt: Date;
+  };
+  emailVerification: {
+    emailSent: boolean;
+    isEmailVerified: boolean;
   };
   verification?: {
     nicNumberProvided: boolean;
@@ -47,6 +52,7 @@ type LoginResponse = {
     username: string;
     email: string;
     role: UserRole;
+    isEmailVerified: boolean;
   };
 };
 
@@ -55,6 +61,15 @@ type RefreshTokenResponse = {
 };
 
 type ResetPasswordResponse = {
+  message: string;
+};
+
+type VerifyEmailResponse = {
+  message: string;
+  isEmailVerified: boolean;
+};
+
+type ResendEmailVerificationResponse = {
   message: string;
 };
 
@@ -93,7 +108,8 @@ export class AuthService {
       selfieImage?: Express.Multer.File[];
     },
   ): Promise<RegisterResponse> {
-    const { username, email, password, role, nicNumber } = registerDto;
+    const { username, password, role, nicNumber } = registerDto;
+    const email = registerDto.email.trim().toLowerCase();
 
     const existingUser = await this.prisma.user.findUnique({
       where: {
@@ -128,7 +144,6 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-
     const userId = crypto.randomUUID();
 
     const nicImage = files?.nicImage?.[0];
@@ -161,6 +176,7 @@ export class AuthService {
         nicHash,
         nicImagePath: nicImageUrl,
         selfiePath: selfieImageUrl,
+        isEmailVerified: false,
         idVerificationStatus:
           nicNumber?.trim() && nicImageUrl && selfieImageUrl
             ? IdVerificationStatus.PENDING
@@ -172,11 +188,22 @@ export class AuthService {
         username: true,
         email: true,
         role: true,
+        isEmailVerified: true,
         nicImagePath: true,
         selfiePath: true,
         createdAt: true,
       },
     });
+
+    let emailSent = false;
+
+    try {
+      await this.sendEmailVerificationLink(user.id, user.email);
+      emailSent = true;
+    } catch (error) {
+      console.log('send email verification error:', error);
+      emailSent = false;
+    }
 
     const shouldQueueIdentityVerification = Boolean(
       nicNumber?.trim() && nicImageUrl && selfieImageUrl,
@@ -233,14 +260,21 @@ export class AuthService {
     }
 
     return {
-      message: 'Registration successful',
+      message: emailSent
+        ? 'Registration successful. Please check your email to verify your account.'
+        : 'Registration successful, but verification email could not be sent. Please request a new verification email.',
       user,
+      emailVerification: {
+        emailSent,
+        isEmailVerified: user.isEmailVerified,
+      },
       ...(verification ? { verification } : {}),
     };
   }
 
   async login(loginDto: LoginDto): Promise<LoginResponse> {
-    const { email, password } = loginDto;
+    const email = loginDto.email.trim().toLowerCase();
+    const { password } = loginDto;
 
     const user = await this.prisma.user.findUnique({
       where: {
@@ -252,6 +286,7 @@ export class AuthService {
         email: true,
         password: true,
         role: true,
+        isEmailVerified: true,
       },
     });
 
@@ -267,9 +302,9 @@ export class AuthService {
 
     const payload: TokenPayload = {
       sub: user.id,
-      email: user.email,
       username: user.username,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
     };
 
     const accessToken = await this.generateAccessToken(payload);
@@ -286,6 +321,7 @@ export class AuthService {
         username: user.username,
         email: user.email,
         role: user.role,
+        isEmailVerified: user.isEmailVerified,
       },
     };
   }
@@ -301,8 +337,8 @@ export class AuthService {
       select: {
         id: true,
         username: true,
-        email: true,
         role: true,
+        isEmailVerified: true,
         refreshTokens: true,
       },
     });
@@ -332,9 +368,9 @@ export class AuthService {
 
     const payload: TokenPayload = {
       sub: user.id,
-      email: user.email,
       username: user.username,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
     };
 
     const newAccessToken = await this.generateAccessToken(payload);
@@ -357,73 +393,75 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    try {
-      const successMessage =
-        'If an account with that email exists, a password reset link has been sent.';
+    const successMessage =
+      'If an account with that email exists, a password reset link has been sent.';
 
-      const user = await this.prisma.user.findUnique({
-        where: {
-          email,
-        },
-        select: {
-          id: true,
-          email: true,
-        },
-      });
+    const normalizedEmail = email.trim().toLowerCase();
 
-      /**
-       * Important security behavior:
-       * Always return the same response, even if the email does not exist.
-       * This prevents attackers from checking which emails are registered.
-       */
-      if (!user) {
-        return {
-          message: successMessage,
-          resetLink: 'test',
-        };
-      }
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email: normalizedEmail,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
 
-      const rawToken = this.generatePasswordResetToken();
-      const tokenHash = this.hashPasswordResetToken(rawToken);
-
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-      /**
-       * Optional cleanup:
-       * Delete old unused reset tokens for this user before creating a new one.
-       */
-      await this.prisma.passwordResetToken.deleteMany({
-        where: {
-          userId: user.id,
-          usedAt: null,
-        },
-      });
-
-      await this.prisma.passwordResetToken.create({
-        data: {
-          tokenHash,
-          userId: user.id,
-          expiresAt,
-        },
-      });
-
-      const frontendUrl = process.env.FRONTEND_URL;
-
-      if (!frontendUrl) {
-        throw new BadRequestException('FRONTEND_URL is missing in .env file');
-      }
-
-      const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
-
-      await this.mailService.sendPasswordResetEmail(user.email, resetLink);
-
+    /**
+     * Important security behavior:
+     * Always return the same response, even if the email does not exist.
+     * This prevents attackers from checking which emails are registered.
+     */
+    if (!user) {
       return {
         message: successMessage,
-        resetLink,
       };
-    } catch (err) {
-      console.log(err);
     }
+
+    const rawToken = this.generatePasswordResetToken();
+    const tokenHash = this.hashPasswordResetToken(rawToken);
+
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    /**
+     * Optional cleanup:
+     * Delete old unused reset tokens for this user before creating a new one.
+     */
+    await this.prisma.passwordResetToken.deleteMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
+      },
+    });
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        tokenHash,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL;
+
+    if (!frontendUrl) {
+      throw new BadRequestException('FRONTEND_URL is missing in .env file');
+    }
+
+    const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+    await this.mailService.sendPasswordResetEmail(user.email, resetLink);
+
+    return {
+      message: successMessage,
+
+      /**
+       * You can remove resetLink in production.
+       * It is useful for testing in Postman during development.
+       */
+      resetLink,
+    };
   }
 
   async resetPassword(
@@ -488,6 +526,112 @@ export class AuthService {
     };
   }
 
+  async verifyEmail(token: string): Promise<VerifyEmailResponse> {
+    const tokenHash = this.hashEmailVerificationToken(token);
+
+    const verificationToken =
+      await this.prisma.emailVerificationToken.findUnique({
+        where: {
+          tokenHash,
+        },
+      });
+
+    if (!verificationToken) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    if (verificationToken.usedAt) {
+      throw new BadRequestException(
+        'Email verification token has already been used',
+      );
+    }
+
+    if (verificationToken.expiresAt < new Date()) {
+      throw new BadRequestException('Email verification token has expired');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: {
+          id: verificationToken.userId,
+        },
+        data: {
+          isEmailVerified: true,
+        },
+      }),
+
+      this.prisma.emailVerificationToken.update({
+        where: {
+          id: verificationToken.id,
+        },
+        data: {
+          usedAt: new Date(),
+        },
+      }),
+
+      /**
+       * Optional cleanup:
+       * Delete any other unused email verification tokens for this user.
+       */
+      this.prisma.emailVerificationToken.deleteMany({
+        where: {
+          userId: verificationToken.userId,
+          usedAt: null,
+          id: {
+            not: verificationToken.id,
+          },
+        },
+      }),
+    ]);
+
+    return {
+      message: 'Email verified successfully',
+      isEmailVerified: true,
+    };
+  }
+
+  async resendEmailVerification(
+    email: string,
+  ): Promise<ResendEmailVerificationResponse> {
+    const successMessage =
+      'If an account with that email exists and is not verified, a verification email has been sent.';
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email: normalizedEmail,
+      },
+      select: {
+        id: true,
+        email: true,
+        isEmailVerified: true,
+      },
+    });
+
+    /**
+     * Security behavior:
+     * Do not reveal whether an email exists in the system.
+     */
+    if (!user) {
+      return {
+        message: successMessage,
+      };
+    }
+
+    if (user.isEmailVerified) {
+      return {
+        message: 'This email is already verified',
+      };
+    }
+
+    await this.sendEmailVerificationLink(user.id, user.email);
+
+    return {
+      message: successMessage,
+    };
+  }
+
   private async saveRefreshToken(
     userId: string,
     refreshToken: string,
@@ -542,6 +686,44 @@ export class AuthService {
     return this.jwtService.signAsync(payload, options);
   }
 
+  private async sendEmailVerificationLink(
+    userId: string,
+    email: string,
+  ): Promise<void> {
+    const rawToken = this.generateEmailVerificationToken();
+    const tokenHash = this.hashEmailVerificationToken(rawToken);
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    /**
+     * Delete old unused verification tokens before creating a new one.
+     */
+    await this.prisma.emailVerificationToken.deleteMany({
+      where: {
+        userId,
+        usedAt: null,
+      },
+    });
+
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        tokenHash,
+        userId,
+        expiresAt,
+      },
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL;
+
+    if (!frontendUrl) {
+      throw new BadRequestException('FRONTEND_URL is missing in .env file');
+    }
+
+    const verificationLink = `${frontendUrl}/verify-email?token=${rawToken}`;
+
+    await this.mailService.sendEmailVerificationEmail(email, verificationLink);
+  }
+
   private hashNic(nicNumber: string): string {
     const secret = process.env.NIC_HASH_SECRET;
 
@@ -562,6 +744,14 @@ export class AuthService {
   }
 
   private hashPasswordResetToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private generateEmailVerificationToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  private hashEmailVerificationToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 }

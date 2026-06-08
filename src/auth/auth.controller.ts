@@ -21,6 +21,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { TokenPayload } from './types/token-payload.type';
 import { JwtService } from '@nestjs/jwt';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -152,6 +154,19 @@ export class AuthController {
     return this.authService.resetPassword(
       resetPasswordDto.token,
       resetPasswordDto.newPassword,
+    );
+  }
+  @Post('verify-email')
+  verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    return this.authService.verifyEmail(verifyEmailDto.token);
+  }
+
+  @Post('resend-email-verification')
+  resendEmailVerification(
+    @Body() resendEmailVerificationDto: ResendEmailVerificationDto,
+  ) {
+    return this.authService.resendEmailVerification(
+      resendEmailVerificationDto.email,
     );
   }
 }
