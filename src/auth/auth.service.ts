@@ -300,6 +300,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (!user.isEmailVerified) {
+      throw new UnauthorizedException({
+        message: 'Please verify your email address before logging in',
+        code: 'EMAIL_NOT_VERIFIED',
+        email: user.email,
+      });
+    }
+
     const payload: TokenPayload = {
       sub: user.id,
       username: user.username,
@@ -408,11 +416,6 @@ export class AuthService {
       },
     });
 
-    /**
-     * Important security behavior:
-     * Always return the same response, even if the email does not exist.
-     * This prevents attackers from checking which emails are registered.
-     */
     if (!user) {
       return {
         message: successMessage,
@@ -424,10 +427,6 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    /**
-     * Optional cleanup:
-     * Delete old unused reset tokens for this user before creating a new one.
-     */
     await this.prisma.passwordResetToken.deleteMany({
       where: {
         userId: user.id,
@@ -455,11 +454,6 @@ export class AuthService {
 
     return {
       message: successMessage,
-
-      /**
-       * You can remove resetLink in production.
-       * It is useful for testing in Postman during development.
-       */
       resetLink,
     };
   }
@@ -509,11 +503,6 @@ export class AuthService {
         },
       }),
 
-      /**
-       * Important:
-       * Remove old refresh tokens so old logged-in sessions are invalidated
-       * after password reset.
-       */
       this.prisma.refreshToken.deleteMany({
         where: {
           userId: resetToken.userId,
@@ -569,10 +558,6 @@ export class AuthService {
         },
       }),
 
-      /**
-       * Optional cleanup:
-       * Delete any other unused email verification tokens for this user.
-       */
       this.prisma.emailVerificationToken.deleteMany({
         where: {
           userId: verificationToken.userId,
@@ -609,10 +594,6 @@ export class AuthService {
       },
     });
 
-    /**
-     * Security behavior:
-     * Do not reveal whether an email exists in the system.
-     */
     if (!user) {
       return {
         message: successMessage,
@@ -695,9 +676,6 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    /**
-     * Delete old unused verification tokens before creating a new one.
-     */
     await this.prisma.emailVerificationToken.deleteMany({
       where: {
         userId,
