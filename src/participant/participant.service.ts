@@ -290,6 +290,8 @@ export class ParticipantService {
     }
 
     return {
+      profileCompleted: this.isParticipantProfileCompleted(participant),
+
       profile: {
         id: participant.id,
         username: participant.username,
@@ -303,7 +305,10 @@ export class ParticipantService {
         profileImagePath: participant.profileImagePath,
         isIdentityVerified: participant.isIdentityVerified,
 
-        participantAge: participant.participantAge,
+        participantAge: participant.dateOfBirth
+          ? this.calculateAge(participant.dateOfBirth)
+          : participant.participantAge,
+
         participantGender: participant.participantGender,
         participantCity: participant.participantCity,
         participantDistrict: participant.participantDistrict,
@@ -354,6 +359,14 @@ export class ParticipantService {
 
     const dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined;
 
+    if (dateOfBirth && Number.isNaN(dateOfBirth.getTime())) {
+      throw new BadRequestException('Invalid date of birth');
+    }
+
+    const calculatedAge = dateOfBirth
+      ? this.calculateAge(dateOfBirth)
+      : undefined;
+
     const updatedParticipant = await this.prisma.user.update({
       where: {
         id: participantId,
@@ -366,7 +379,7 @@ export class ParticipantService {
         phoneNumber: dto.phoneNumber,
         dateOfBirth,
 
-        participantAge: dto.participantAge,
+        participantAge: calculatedAge,
         participantGender: dto.participantGender,
         participantCity: dto.participantCity,
         participantDistrict: dto.participantDistrict,
@@ -400,7 +413,13 @@ export class ParticipantService {
 
     return {
       message: 'Profile settings updated successfully',
-      profile: updatedParticipant,
+      profileCompleted: this.isParticipantProfileCompleted(updatedParticipant),
+      profile: {
+        ...updatedParticipant,
+        participantAge: updatedParticipant.dateOfBirth
+          ? this.calculateAge(updatedParticipant.dateOfBirth)
+          : updatedParticipant.participantAge,
+      },
     };
   }
 
@@ -625,6 +644,8 @@ export class ParticipantService {
         username: true,
         email: true,
         role: true,
+        dateOfBirth: true,
+        isEmailVerified: true,
         nicImagePath: true,
         selfiePath: true,
         isIdentityVerified: true,
@@ -847,7 +868,12 @@ export class ParticipantService {
       welcome: {
         username: participant.username,
       },
-
+      profileStatus: {
+        profileCompleted: this.isParticipantProfileCompleted(participant),
+        shouldShowCompleteProfilePopup:
+          participant.isEmailVerified === true &&
+          !this.isParticipantProfileCompleted(participant),
+      },
       summaryCards: {
         availableSurveys: availableAndLocked.availableSurveys.length,
         completedSurveys: completedSurveysCount,
@@ -2821,7 +2847,49 @@ export class ParticipantService {
       },
     });
   }
+  private calculateAge(dateOfBirth: Date | string | null): number | null {
+    if (!dateOfBirth) {
+      return null;
+    }
 
+    const dob = new Date(dateOfBirth);
+
+    if (Number.isNaN(dob.getTime())) {
+      return null;
+    }
+
+    const today = new Date();
+
+    let age = today.getFullYear() - dob.getFullYear();
+
+    const hasBirthdayPassedThisYear =
+      today.getMonth() > dob.getMonth() ||
+      (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+
+    if (!hasBirthdayPassedThisYear) {
+      age -= 1;
+    }
+
+    return age;
+  }
+
+  private isParticipantProfileCompleted(participant: {
+    dateOfBirth: Date | null;
+    participantGender: AudienceGender | null;
+    participantCity: string | null;
+    participantDistrict: string | null;
+    participantEducationLevel: string | null;
+    participantOccupation: string | null;
+  }): boolean {
+    return Boolean(
+      participant.dateOfBirth &&
+      participant.participantGender &&
+      participant.participantCity &&
+      participant.participantDistrict &&
+      participant.participantEducationLevel &&
+      participant.participantOccupation,
+    );
+  }
   private toNumber(value: unknown): number {
     if (value === null || value === undefined) {
       return 0;
